@@ -29,9 +29,10 @@ void             recv_cb(evutil_socket_t, short, void*);
 struct event_cb_args {
     struct event_base* base;
     void*              event_self;
+    void*              data_processor;
 };
 
-int main(int argc, char* argv[]) {
+int init_server(const char* restrict port, void* data_processor) {
     struct event_base* base;
     evutil_socket_t    main_sockfd;
     int                status;
@@ -41,15 +42,16 @@ int main(int argc, char* argv[]) {
     base = event_base_new();
     catchExcp(base == NULL, "Couldn't open event base.\n", 1);
 
-    main_sockfd = local_socket_bind_listen(PORT);
+    main_sockfd = local_socket_bind_listen(port);
 
     status = evutil_make_socket_nonblocking(main_sockfd);
-	catchExcp(status == -1, "Couldn't make listen socket non-blocking", 1);
+    catchExcp(status == -1, "Couldn't make listen socket non-blocking", 1);
 
     /* event_self_cbarg uses magic to pass event_read as
         an argument to the event_new cb function */
     struct event_cb_args event_read_args = {.base       = base,
-                                            .event_self = event_self_cbarg()};
+                                            .event_self = event_self_cbarg(),
+                                            .data_processor = data_processor};
 
     /* EV_PERSIST allows reading unlimited data from user, or until the callback
     function runs event_del */
@@ -68,6 +70,11 @@ int main(int argc, char* argv[]) {
 
     evutil_closesocket(main_sockfd);
     event_free(event_read);
+
+    return 0;
+
+err:
+    return -1;
 }
 
 /** check if a function that returned `status` threw an error (Meaning it
@@ -77,11 +84,13 @@ returned `bad_status`)
  * @param err_msg Error message, prints to `stderr`.
  * @param bool_exit Whether to exit the program at failure.
 */
-void catchExcp(int condition, const char* restrict err_msg, int bool_exit) {
+void catchExcp(int condition, const char* restrict err_msg, int action) {
     if ( condition ) {
         fprintf(stderr, "%s\n", err_msg);
-        if ( bool_exit )
+        switch ( action ) {
+        case 1:
             exit(1);
+        }
     }
 }
 
@@ -114,17 +123,19 @@ void accept_cb(evutil_socket_t sockfd, short flags, void* arg) {
 
     evutil_make_socket_nonblocking(incoming_sockfd);
 
-    event_incoming =
-        event_new(base, incoming_sockfd, EV_READ, recv_cb, event_self_cbarg());
+    event_incoming = event_new(base, incoming_sockfd, EV_READ, recv_cb, arg);
     catchExcp(event_incoming == NULL,
               "event_new: couldn't initialize accept event", 1);
 
     status = event_add(event_incoming, NULL);
     catchExcp(status == -1, "event_add: couldn't add accept event", 1);
+
+    free(sockaddr);
 }
 
 /**
  * @brief Callback function to read data sent from client.
+ *
  * After the connection is established (via `accept()` and the accept_cb()
  * callback function), the client may send data. This function receives the data
  * and closes the connection.
@@ -132,22 +143,26 @@ void accept_cb(evutil_socket_t sockfd, short flags, void* arg) {
  * documentation of `event_new()`.
  */
 void recv_cb(evutil_socket_t sockfd, short flags, void* arg) {
-    ev_ssize_t nbytes          = 0;
-    ev_ssize_t total_bytes     = 0;
-	int buffer_size = MAX_BUFFER_SIZE;
-    char*      incoming_buffer = calloc(buffer_size, sizeof(char));
+    struct event_cb_args* args                = (struct event_cb_args*)arg;
+    ev_ssize_t            nbytes              = 0;
+    ev_ssize_t            total_bytes         = 0;
+    int                   request_buffer_size = MAX_BUFFER_SIZE;
+    char* incoming_buffer = calloc(request_buffer_size, sizeof(char));
+    int (*processor_function)(char* restrict request_buffer,
+                              char* restrict respond_buffer,
+                              ev_ssize_t* response_len) = args->data_processor;
+    struct event* self = args->event_self;
 
     catchExcp(incoming_buffer == NULL, "calloc: couldn't allocate buffer", 1);
 
     do {
         total_bytes += nbytes;
         nbytes = recv(sockfd, incoming_buffer + total_bytes,
-                      buffer_size - total_bytes, 0);
-    } while ( nbytes > 0 && total_bytes < buffer_size &&
-              nbytes != SOCKET_ERROR ); // Second condition is in case
+                      request_buffer_size - total_bytes, 0);
+    } while ( nbytes > 0 && total_bytes < request_buffer_size &&
+              nbytes != SOCKET_ERROR ); // Third condition is in case
                                         // SOCKET_ERROR >= 0 in Windows
 
-    // idek anymore
     if ( nbytes == SOCKET_ERROR &&
          !(EVUTIL_SOCKET_ERROR() & (EWOULDBLOCK | ECONNRESET)) ) {
         fprintf(stderr, "recv: %s\n",
@@ -155,12 +170,31 @@ void recv_cb(evutil_socket_t sockfd, short flags, void* arg) {
         exit(1);
     }
 
-    printf("Got %zd bytes\n", total_bytes);
-    printf("Received: %s\n", incoming_buffer);
-    printf("Sending: %s\n", "hello");
+    /**********************************
+                Parsing data and responding
+        ***********************************/
+
+    int         response_buffer_size = MAX_BUFFER_SIZE;
+    char* response = calloc(sizeof(char), response_buffer_size);
+    ev_ssize_t  response_len = response_buffer_size;
+    ev_ssize_t  bytes_sent = 0;
+    nbytes                 = 0;
+
+    processor_function(incoming_buffer, response, &response_len);
+
+    do {
+        bytes_sent += nbytes;
+        nbytes = send(sockfd, response, response_len, 0);
+    } while ( bytes_sent < response_len && nbytes != SOCKET_ERROR );
+
+    if ( nbytes == SOCKET_ERROR ) {
+        fprintf(stderr, "send: %s\n",
+                evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
+        exit(1);
+    }
 
     evutil_closesocket(sockfd);
-    event_free((struct event*)arg);
+    event_free(self);
 }
 
 /**
@@ -170,7 +204,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void* arg) {
  * @return int
  */
 int local_socket_bind_listen(const char* restrict port) {
-    struct addrinfo*   servinfo = get_local_addrinfo(port);
+    struct addrinfo* servinfo = get_local_addrinfo(port);
     struct addrinfo* servinfo_next;
     struct sockaddr* sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
     int              status;

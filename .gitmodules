@@ -1,0 +1,3 @@
+[submodule "llhttp"]
+	path = libs/llhttp
+	url = git@github.com:nodejs/llhttp.git

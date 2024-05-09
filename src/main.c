@@ -12,32 +12,45 @@
 #define SOCKET_ERROR -1
 
 #endif
-
+#include "libs/picohttpparser.h"
+#include <assert.h>
 #include <stdarg.h> // for vargs, is this Windows compatible?
 
-#define PORT            "25565"
-#define BACKLOG         64
-#define MAX_BUFFER_SIZE 256
-
-struct addrinfo* get_local_addrinfo(const char*);
-struct sockaddr* get_sockaddr(struct addrinfo*);
-int              local_socket_bind_listen(const char*);
-void             catchExcp(int, const char*, int);
-void             accept_cb(evutil_socket_t, short, void*);
-void             recv_cb(evutil_socket_t, short, void*);
+#define PORT                 "25565"
+#define BACKLOG              64
+#define INIT_MAX_BUFFER_SIZE 256
+#define MAX_NUM_HEADERS      100
 
 struct event_cb_args {
-    struct event_base* base;
-    void*              event_self;
-    void*              data_processor;
+    struct event_base *base;
+    void              *event_self;
+    void              *data_processor;
 };
 
-int init_server(const char* restrict port, void* data_processor) {
-    struct event_base* base;
+typedef struct {
+    const char       *method, *path;
+    size_t            method_len, path_len, body_len, num_headers;
+    int               minor_ver;
+    struct phr_header headers[MAX_NUM_HEADERS];
+    char             *body;
+
+} http_req;
+
+struct addrinfo *get_local_addrinfo(const char *);
+struct sockaddr *get_sockaddr(struct addrinfo *);
+int              local_socket_bind_listen(const char *);
+void             catchExcp(int, const char *, int);
+void             accept_cb(evutil_socket_t, short, void *);
+void             recv_cb(evutil_socket_t, short, void *);
+int              http_parse_request(char **request, http_req *req_struct,
+                                    ev_ssize_t bytes_read);
+
+int init_server(const char *restrict port, void *data_processor) {
+    struct event_base *base;
     evutil_socket_t    main_sockfd;
     int                status;
-    struct event*      event_read;
-    struct event*      event_write;
+    struct event      *event_read;
+    struct event      *event_write;
 
     base = event_base_new();
     catchExcp(base == NULL, "Couldn't open event base.\n", 1);
@@ -84,27 +97,27 @@ returned `bad_status`)
  * @param err_msg Error message, prints to `stderr`.
  * @param bool_exit Whether to exit the program at failure.
 */
-void catchExcp(int condition, const char* restrict err_msg, int action) {
+void catchExcp(int condition, const char *restrict err_msg, int action) {
     if ( condition ) {
         fprintf(stderr, "%s\n", err_msg);
         switch ( action ) {
-        case 1:
-            exit(1);
+            case 1:
+                exit(1);
         }
     }
 }
 
-void accept_cb(evutil_socket_t sockfd, short flags, void* arg) {
+void accept_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     printf("listener\n");
 
     evutil_socket_t      incoming_sockfd;
-    struct event_cb_args args = *(struct event_cb_args*)arg;
-    struct event_base*   base = args.base;
-    struct event*        self = args.event_self;
-    struct event*        event_incoming;
-    // sockaddr big enough for either IPv4 and IPv6
-    struct sockaddr_storage* sockaddr =
+    struct event_cb_args args = *(struct event_cb_args *)arg;
+    struct event_base   *base = args.base;
+    struct event        *self = args.event_self;
+    struct event        *event_incoming;
+    // sockaddr big enough for either IPv4 or IPv6
+    struct sockaddr_storage *sockaddr =
         calloc(1, sizeof(struct sockaddr_storage));
     ev_socklen_t sockaddr_size = sizeof(struct sockaddr_storage);
     ev_ssize_t   nbytes        = 0;
@@ -113,7 +126,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void* arg) {
     // sockfd is nonblocking but this function is only called when there's data
     // to read, so we expect no blocking on this call and the next recv() call
     incoming_sockfd =
-        accept(sockfd, (struct sockaddr*)sockaddr, &sockaddr_size);
+        accept(sockfd, (struct sockaddr *)sockaddr, &sockaddr_size);
 
     if ( incoming_sockfd == EVUTIL_INVALID_SOCKET ) {
         fprintf(stderr, "accept: %s",
@@ -142,43 +155,79 @@ void accept_cb(evutil_socket_t sockfd, short flags, void* arg) {
  * Signature matches the required signature for callback function in
  * documentation of `event_new()`.
  */
-void recv_cb(evutil_socket_t sockfd, short flags, void* arg) {
-    struct event_cb_args* args                = (struct event_cb_args*)arg;
-    ev_ssize_t            nbytes              = 0;
-    ev_ssize_t            total_bytes         = 0;
-    int                   request_buffer_size = MAX_BUFFER_SIZE;
-    char* incoming_buffer = calloc(request_buffer_size, sizeof(char));
-    int (*processor_function)(char* restrict request_buffer,
-                              char* restrict respond_buffer,
-                              ev_ssize_t* response_len) = args->data_processor;
-    struct event* self = args->event_self;
+void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
+    struct event_cb_args *args                = (struct event_cb_args *)arg;
+    int                   request_buffer_size = INIT_MAX_BUFFER_SIZE;
+    char *incoming_buffer = calloc(request_buffer_size, sizeof(char));
+    int (*processor_function)(char *restrict request_buffer,
+                              char *restrict respond_buffer,
+                              ev_ssize_t *response_len) = args->data_processor;
+    struct event *self                                  = args->event_self;
 
     catchExcp(incoming_buffer == NULL, "calloc: couldn't allocate buffer", 1);
 
-    do {
+    /** Receive and parse request line (method, path, HTTP version, headers) **/
+
+    http_req   request;
+    ev_ssize_t nbytes      = 0;
+    ev_ssize_t total_bytes = 0;
+    ev_ssize_t bytes_read  = 0;
+
+    while ( 1 ) {
         total_bytes += nbytes;
         nbytes = recv(sockfd, incoming_buffer + total_bytes,
                       request_buffer_size - total_bytes, 0);
-    } while ( nbytes > 0 && total_bytes < request_buffer_size &&
-              nbytes != SOCKET_ERROR ); // Third condition is in case
-                                        // SOCKET_ERROR >= 0 in Windows
 
-    if ( nbytes == SOCKET_ERROR &&
-         !(EVUTIL_SOCKET_ERROR() & (EWOULDBLOCK | ECONNRESET)) ) {
-        fprintf(stderr, "recv: %s\n",
-                evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-        exit(1);
+        if ( nbytes == SOCKET_ERROR ) {
+            switch ( EVUTIL_SOCKET_ERROR() ) {
+                case ECONNRESET:
+                    // TODO: handle connection reset by client
+                    break;
+                default:
+                    fprintf(
+                        stderr, "recv: %s\n",
+                        evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
+                    exit(1);
+            }
+        }
+
+        bytes_read =
+            http_parse_request(&incoming_buffer, &request, total_bytes);
+
+        switch ( bytes_read ) {
+            case -1:      // TODO: Bad request?
+                break;
+            case -2:      // Incomplete request
+                continue; // continue receiving, go to outer do..while loop
+            default:
+                assert(bytes_read > 0); // TODO: is this good practice? we
+                                        // always expect bytes_read >= -2
+                break;
+        }
+
+        incoming_buffer +=
+            total_bytes; // Advance request buf pointer, should be
+                         // pointing to start of message content now
+
+        nbytes      = 0;
+        total_bytes = 0;
+        break;
     }
+
+    // TODO: do stuff based on method type, receive rest of the content based on
+    // content-length header
+
+    /** Read request contents **/
 
     /**********************************
                 Parsing data and responding
         ***********************************/
 
-    int         response_buffer_size = MAX_BUFFER_SIZE;
-    char* response = calloc(sizeof(char), response_buffer_size);
-    ev_ssize_t  response_len = response_buffer_size;
-    ev_ssize_t  bytes_sent = 0;
-    nbytes                 = 0;
+    int        response_buffer_size = INIT_MAX_BUFFER_SIZE;
+    char      *response     = calloc(sizeof(char), response_buffer_size);
+    ev_ssize_t response_len = response_buffer_size;
+    ev_ssize_t bytes_sent   = 0;
+    nbytes                  = 0;
 
     processor_function(incoming_buffer, response, &response_len);
 
@@ -197,16 +246,27 @@ void recv_cb(evutil_socket_t sockfd, short flags, void* arg) {
     event_free(self);
 }
 
+int http_parse_request(char **request, ev_ssize_t request_len,
+                       http_req *req_struct, ev_ssize_t bytes_read) {
+
+    bytes_read = phr_parse_request(
+        *request, request_len, &req_struct->method, &req_struct->method_len,
+        &req_struct->path, &req_struct->path_len, &req_struct->minor_ver,
+        req_struct->headers, &req_struct->num_headers, bytes_read);
+
+    return bytes_read;
+}
+
 /**
  * @brief needs refactoring
  *
  * @param servinfo
  * @return int
  */
-int local_socket_bind_listen(const char* restrict port) {
-    struct addrinfo* servinfo = get_local_addrinfo(port);
-    struct addrinfo* servinfo_next;
-    struct sockaddr* sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
+int local_socket_bind_listen(const char *restrict port) {
+    struct addrinfo *servinfo = get_local_addrinfo(port);
+    struct addrinfo *servinfo_next;
+    struct sockaddr *sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
     int              status;
     evutil_socket_t  main_sockfd;
 
@@ -255,9 +315,9 @@ int local_socket_bind_listen(const char* restrict port) {
     return main_sockfd;
 }
 
-struct addrinfo* get_local_addrinfo(const char* restrict port) {
+struct addrinfo *get_local_addrinfo(const char *restrict port) {
     struct addrinfo  hints;
-    struct addrinfo* res;
+    struct addrinfo *res;
     int              status;
 
     memset(&hints, 0, sizeof hints);
@@ -272,7 +332,7 @@ struct addrinfo* get_local_addrinfo(const char* restrict port) {
     return res;
 }
 
-struct sockaddr* get_sockaddr(struct addrinfo* ai) {
+struct sockaddr *get_sockaddr(struct addrinfo *ai) {
     /* 	switch (ai->ai_family) {
                     // IPv4
                     case AF_INET:

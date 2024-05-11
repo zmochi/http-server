@@ -12,6 +12,7 @@
 #define SOCKET_ERROR -1
 
 #endif
+
 #include "libs/picohttpparser.h"
 #include <assert.h>
 #include <stdarg.h> // for vargs, is this Windows compatible?
@@ -44,6 +45,11 @@ void             accept_cb(evutil_socket_t, short, void *);
 void             recv_cb(evutil_socket_t, short, void *);
 int              http_parse_request(char **request, http_req *req_struct,
                                     ev_ssize_t bytes_read);
+ev_ssize_t http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
+                                       ev_ssize_t  buffer_len,
+                                       http_req   *http_request,
+                                       ev_ssize_t *bytes_received,
+                                       ev_ssize_t *bytes_parsed);
 
 int init_server(const char *restrict port, void *data_processor) {
     struct event_base *base;
@@ -156,68 +162,47 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *arg) {
  * documentation of `event_new()`.
  */
 void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
-    struct event_cb_args *args                = (struct event_cb_args *)arg;
-    int                   request_buffer_size = INIT_MAX_BUFFER_SIZE;
-    char *incoming_buffer = calloc(request_buffer_size, sizeof(char));
-    int (*processor_function)(char *restrict request_buffer,
-                              char *restrict respond_buffer,
-                              ev_ssize_t *response_len) = args->data_processor;
-    struct event *self                                  = args->event_self;
+    struct event_cb_args *args = (struct event_cb_args *)arg; // TODO: remove?
+    struct event         *self = args->event_self;
+
+    int   request_buffer_size = INIT_MAX_BUFFER_SIZE;
+    char *incoming_buffer     = calloc(request_buffer_size, sizeof(char));
 
     catchExcp(incoming_buffer == NULL, "calloc: couldn't allocate buffer", 1);
 
     /** Receive and parse request line (method, path, HTTP version, headers) **/
 
     http_req   request;
-    ev_ssize_t nbytes      = 0;
-    ev_ssize_t total_bytes = 0;
-    ev_ssize_t bytes_read  = 0;
+    ev_ssize_t nbytes         = 0;
+    ev_ssize_t bytes_parsed   = 0;
+    ev_ssize_t bytes_recieved = 0;
 
-    while ( 1 ) {
-        total_bytes += nbytes;
-        nbytes = recv(sockfd, incoming_buffer + total_bytes,
-                      request_buffer_size - total_bytes, 0);
+    http_recv_and_parse_request(sockfd, incoming_buffer, request_buffer_size,
+                                &request, &bytes_recieved, &bytes_parsed);
 
-        if ( nbytes == SOCKET_ERROR ) {
-            switch ( EVUTIL_SOCKET_ERROR() ) {
-                case ECONNRESET:
-                    // TODO: handle connection reset by client
-                    break;
-                default:
-                    fprintf(
-                        stderr, "recv: %s\n",
-                        evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-                    exit(1);
-            }
-        }
-
-        bytes_read =
-            http_parse_request(&incoming_buffer, &request, total_bytes);
-
-        switch ( bytes_read ) {
-            case -1:      // TODO: Bad request?
-                break;
-            case -2:      // Incomplete request
-                continue; // continue receiving, go to outer do..while loop
-            default:
-                assert(bytes_read > 0); // TODO: is this good practice? we
-                                        // always expect bytes_read >= -2
-                break;
-        }
-
-        incoming_buffer +=
-            total_bytes; // Advance request buf pointer, should be
-                         // pointing to start of message content now
-
-        nbytes      = 0;
-        total_bytes = 0;
-        break;
-    }
+    incoming_buffer += bytes_parsed; // Advance request buf pointer,
+                                     // should be pointing to start of
+                                     // message content now
 
     // TODO: do stuff based on method type, receive rest of the content based on
     // content-length header
 
     /** Read request contents **/
+
+    // should Content_Length value be used here, or be calculated from the
+    // number of bytes received by recv()?
+    ev_ssize_t http_content_len =
+        atoi(http_get_header(request, "Content-Length")
+                 ->value); // TODO: TRUSTING USER INPUT!!
+    char *http_request_body = malloc(request->headers);
+
+    http_recv_body(http_request_body);
+
+    while () {
+        total_bytes += nbytes;
+        nbytes = recv(sockfd, incoming_buffer + total_bytes,
+                      request_buffer_size - total_bytes, 0);
+    }
 
     /**********************************
                 Parsing data and responding
@@ -228,8 +213,6 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     ev_ssize_t response_len = response_buffer_size;
     ev_ssize_t bytes_sent   = 0;
     nbytes                  = 0;
-
-    processor_function(incoming_buffer, response, &response_len);
 
     do {
         bytes_sent += nbytes;
@@ -246,11 +229,69 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     event_free(self);
 }
 
-int http_parse_request(char **request, ev_ssize_t request_len,
-                       http_req *req_struct, ev_ssize_t bytes_read) {
+ev_ssize_t http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
+                                       ev_ssize_t  buffer_len,
+                                       http_req   *http_request,
+                                       ev_ssize_t *bytes_received,
+                                       ev_ssize_t *bytes_parsed) {
+
+    ev_ssize_t nbytes             = 0;
+    ev_ssize_t tot_bytes_received = 0;
+    ev_ssize_t tot_bytes_parsed   = 0;
+
+    while ( 1 ) {
+        tot_bytes_received += nbytes;
+        nbytes = recv(sockfd, buffer + tot_bytes_received,
+                      buffer_len - tot_bytes_received, 0);
+
+        if ( nbytes == SOCKET_ERROR ) {
+            switch ( EVUTIL_SOCKET_ERROR() ) {
+                case ECONNRESET:
+                    // TODO: handle connection reset by client
+                    break;
+                default:
+                    fprintf(
+                        stderr, "recv: %s\n",
+                        evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
+                    exit(1);
+            }
+        }
+
+        // TODO: make sure bytes_read returns the TOTAL number of bytes read,
+        // even if called a second time. If it returns the number of bytes read
+        // for this iteration we need += instead of =
+        tot_bytes_parsed =
+            http_parse_request(&buffer, http_request, tot_bytes_parsed);
+
+        switch ( tot_bytes_parsed ) {
+            case -1:      // TODO: Bad request?
+                break;
+            case -2:      // Incomplete request
+                continue; // continue receiving, go to outer do..while loop
+            default:
+                assert(tot_bytes_parsed > 0); // TODO: is this good practice? we
+                                              // always expect bytes_read >= -2
+                break;
+        }
+
+        nbytes = 0;
+        break;
+    }
+
+    *bytes_received = tot_bytes_parsed;
+    *bytes_parsed   = tot_bytes_parsed;
+
+    return 0; // success
+}
+
+int http_recv_body() {}
+
+int http_parse_request(char **buffer, ev_ssize_t request_len,
+                       http_req *req_struct, ev_ssize_t bytes_read,
+                       ev_ssize_t *buffer_bytes_read) {
 
     bytes_read = phr_parse_request(
-        *request, request_len, &req_struct->method, &req_struct->method_len,
+        *buffer, request_len, &req_struct->method, &req_struct->method_len,
         &req_struct->path, &req_struct->path_len, &req_struct->minor_ver,
         req_struct->headers, &req_struct->num_headers, bytes_read);
 

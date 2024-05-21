@@ -1,0 +1,197 @@
+// if any of the names defined below are changed, make sure to update the function at the bottom
+%{
+#include "picohttpparser.h"
+%}
+%compare-strncmp 
+%global_table
+%define initializer-suffix ,NULL
+%define word-array-name http_headerlist
+%define length-table-name http_header_lengthtable
+%define hash-function-name http_hash_header
+%define lookup-function-name http_get_header
+struct hash_header { char *name; struct phr_header *req_header; };
+int http_set_header(const char *name, size_t name_len,
+                    struct phr_header *req_header);
+%%
+A-IM
+Accept
+Accept-Additions
+Accept-CH
+Accept-Datetime
+Accept-Encoding
+Accept-Features
+Accept-Language
+Accept-Patch
+Accept-Post
+Accept-Ranges
+Accept-Signature
+Access-Control-Allow-Credentials
+Access-Control-Allow-Headers
+Access-Control-Allow-Methods
+Access-Control-Allow-Origin
+Access-Control-Expose-Headers
+Access-Control-Max-Age
+Access-Control-Request-Headers
+Access-Control-Request-Method
+Age
+Allow
+ALPN
+Alt-Svc
+Alt-Used
+Alternates
+Apply-To-Redirect-Ref
+Authentication-Control
+Authentication-Info
+Authorization
+Cache-Control
+Cache-Status
+Cal-Managed-ID
+CalDAV-Timezones
+Capsule-Protocol
+CDN-Cache-Control
+CDN-Loop
+Cert-Not-After
+Cert-Not-Before
+Clear-Site-Data
+Client-Cert
+Client-Cert-Chain
+Close
+Connection
+Content-Digest
+Content-Disposition
+Content-Encoding
+Content-Language
+Content-Length
+Content-Location
+Content-Range
+Content-Security-Policy
+Content-Security-Policy-Report-Only
+Content-Type
+Cookie
+Cross-Origin-Embedder-Policy
+Cross-Origin-Embedder-Policy-Report-Only
+Cross-Origin-Opener-Policy
+Cross-Origin-Opener-Policy-Report-Only
+Cross-Origin-Resource-Policy
+DASL
+Date
+DAV
+Delta-Base
+Depth
+Destination
+DPoP
+DPoP-Nonce
+Early-Data
+ETag
+Expect
+Expires
+Forwarded
+From
+Hobareg
+Host
+If
+If-Match
+If-Modified-Since
+If-None-Match
+If-Range
+If-Schedule-Tag-Match
+If-Unmodified-Since
+IM
+Include-Referred-Token-Binding-ID
+Keep-Alive
+Label
+Last-Event-ID
+Last-Modified
+Link
+Location
+Lock-Token
+Max-Forwards
+Memento-Datetime
+Meter
+MIME-Version
+Negotiate
+NEL
+OData-EntityId
+OData-Isolation
+OData-MaxVersion
+OData-Version
+Optional-WWW-Authenticate
+Ordering-Type
+Origin
+Origin-Agent-Cluster
+OSCORE
+OSLC-Core-Version
+Overwrite
+Ping-From
+Ping-To
+Position
+Prefer
+Preference-Applied
+Priority
+Proxy-Authenticate
+Proxy-Authentication-Info
+Proxy-Authorization
+Proxy-Status
+Public-Key-Pins
+Public-Key-Pins-Report-Only
+Range
+Redirect-Ref
+Referer
+Refresh
+Replay-Nonce
+Repr-Digest
+Retry-After
+Schedule-Reply
+Schedule-Tag
+Sec-Purpose
+Sec-Token-Binding
+Sec-WebSocket-Accept
+Sec-WebSocket-Extensions
+Sec-WebSocket-Key
+Sec-WebSocket-Protocol
+Sec-WebSocket-Version
+Server
+Server-Timing
+Set-Cookie
+Signature
+Signature-Input
+SLUG
+SoapAction
+Status-URI
+Strict-Transport-Security
+Sunset
+TCN
+TE
+Timeout
+Topic
+Traceparent
+Tracestate
+Trailer
+Transfer-Encoding
+TTL
+Upgrade
+Urgency
+User-Agent
+Variant-Vary
+Vary
+Via
+Want-Content-Digest
+Want-Repr-Digest
+WWW-Authenticate
+X-Content-Type-Options
+X-Frame-Options
+%%
+int http_set_header(const char *name, size_t name_len,
+                    struct phr_header *req_header) {
+    if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
+
+        unsigned int key = http_hash_header(name, name_len);
+
+        if ( key <= MAX_HASH_VALUE ) {
+
+            http_headerlist[key].req_header = req_header;
+            return 0; // success
+        }
+    }
+    return 1; // Invalid header
+}

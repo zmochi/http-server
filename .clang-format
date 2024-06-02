@@ -1,0 +1,37 @@
+---
+BasedOnStyle: LLVM
+IndentWidth: 4
+---
+Language: Cpp
+ColumnLimit: 80 # After how many characters to break into a new line
+PointerAlignment: Right
+SpacesInParens: Custom
+SpacesInParensOptions:
+ InConditionalStatements: true # if(cond) -> if( cond )
+
+# aligns assignments along =
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+# aligns assignments along variable name
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+    
+# align preprocessor macros
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+# indent 'case' statements in a switch block
+IndentCaseLabels: true
+
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 1
+
+AllowShortBlocksOnASingleLine: Empty # When a {} block is empty, put it on a single line

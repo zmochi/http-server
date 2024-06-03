@@ -1,9 +1,6 @@
 [submodule "llhttp"]
 	path = libs/llhttp
 	url = git@github.com:nodejs/llhttp.git
-[submodule "src/libs/gperf"]
-	path = src/libs/gperf
-	url = git@github.com:jwinarske/gperf.git
 [submodule "src/libs/picohttpparser"]
 	path = src/libs/picohttpparser
 	url = git@github.com:h2o/picohttpparser.git

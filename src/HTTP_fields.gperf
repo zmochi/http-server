@@ -1,6 +1,6 @@
 // if any of the names defined below are changed, make sure to update the function at the bottom
 %{
-#include "picohttpparser.h"
+#include "headers.h"
 %}
 %compare-strncmp 
 %global_table

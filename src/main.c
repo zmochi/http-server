@@ -281,7 +281,8 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     switch ( status ) {
         case HTTP_INCOMPLETE_REQ:
-            return; // wait for more data to become available
+            http_handle_incomplete_req(con_data);
+            return; /* wait for more data to become available */
 
         case HTTP_ENTITY_TOO_LARGE:
             http_respond_fallback(con_data, Request_Entity_Too_Large);
@@ -661,6 +662,7 @@ int finished_receiving(struct client_data *con_data) {
  * HTTP_ENTITY_TOO_LARGE when the user-specified Content-Length is bigger
  * than maximum recv buffer size
  * HTTP_BAD_REQ if the Content-Length header has an invalid value.
+ * EXIT_SUCCESS if all expected content was received
  */
 int http_parse_content(struct client_data *con_data, size_t *content_length) {
     short content_length_header_flags;
@@ -675,49 +677,46 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
     if ( *content_length != 0 ) {
         content_length_header_flags = HEADER_EXISTS | HEADER_VALUE_VALID;
     } else {
+        /* populate content_length variable with value from user */
         content_length_header_flags = http_extract_content_length(
             content_length,
             MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_parsed);
     }
 
-    if ( content_length_header_flags & HEADER_EXISTS ) {
-        /* if user-provided Content-Length header has a valid value */
-        if ( content_length_header_flags & HEADER_VALUE_VALID ) {
-
-            /* resize buffer if necessary (handler_buf_realloc does not resize
-            if unnecessary)
-             *
-             * this call can be optimized since we don't need to reallocate
-            space for request line + headers
-             */
-            handler_buf_realloc(
-                &con_data->recv_buf->buffer, &con_data->recv_buf->capacity,
-                MAX_RECV_BUFFER_SIZE,
-                *content_length + con_data->recv_buf->bytes_parsed);
-
-            if ( con_data->recv_buf->bytes_received <
-                 *content_length + con_data->recv_buf->bytes_parsed ) {
-                return HTTP_INCOMPLETE_REQ;
-            }
-
-            /* we choose to trust the user-supplied Content-Length value
-            here as long as its smaller than the maximum buffer size.
-            this might pose a problem if the recv_buffer wasn't cleared
-            somehow for this connection, but this shouldn't happen. */
-            con_data->recv_buf->bytes_parsed += *content_length;
-            con_data->recv_buf->content_parsed = true;
-
-            return 0;
-        } else { /* Invalid Content-Length value */
-            if ( content_length_header_flags & HEADER_VALUE_EXCEEDS_MAX ) {
-                return HTTP_ENTITY_TOO_LARGE;
-            } else {
-                return HTTP_BAD_REQ;
-            }
-        }
+    if ( !(content_length_header_flags & HEADER_EXISTS) ) {
+        /* no Content-Length header, indicate parsing is finished */
+        return EXIT_SUCCESS;
+    }
+    /* if user-provided Content-Length header has an invalid value */
+    if ( !(content_length_header_flags & HEADER_VALUE_VALID) ) {
+        if ( content_length_header_flags & HEADER_VALUE_EXCEEDS_MAX )
+            return HTTP_ENTITY_TOO_LARGE;
+        else
+            return HTTP_BAD_REQ;
     }
 
-    // TODO: define http_extract_transfer_encoding
+    /* incomplete request: need to receive more data/reallocate buffer, to match
+     * user-provided Content-Length value */
+    if ( con_data->recv_buf->bytes_received <
+         *content_length + con_data->recv_buf->bytes_parsed )
+        return HTTP_INCOMPLETE_REQ;
+
+    /* we choose to trust the user-supplied Content-Length value
+     * here as long as its smaller than the maximum buffer size, and the total
+     * amount of bytes parsed + Content-Length does not exceed the amount of
+     * bytes received (checked above)
+     *
+     * this might pose a problem if the
+     * recv_buffer wasn't cleared somehow for this connection, but this
+     * shouldn't happen.
+     */
+    con_data->recv_buf->bytes_parsed += *content_length;
+    con_data->recv_buf->content_parsed = true;
+
+    /* indicate parsing is finished */
+    return EXIT_SUCCESS;
+
+    // TODO: implement http_extract_transfer_encoding
     content_length_header_flags = http_extract_validate_header(
         "Transfer-Encoding", strlen("Transfer-Encoding"), "chunked",
         strlen("chunked"));

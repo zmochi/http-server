@@ -1,5 +1,7 @@
 #include "main.h"
 
+#define MAX_BUF_SIZE_EXCEEDED 2
+
 struct addrinfo *get_local_addrinfo(const char *port);
 int              local_socket_bind_listen(const char *port);
 
@@ -12,8 +14,8 @@ int              local_socket_bind_listen(const char *port);
  * @return 0 on success, -1 on error, or the number of
  * bytes written to buffer if EOF was not reached.
  */
-int         load_file_to_buf(char *buf, size_t buflen, size_t *bytes_written,
-                             const char *filepath, size_t last_len);
+ev_ssize_t  load_file_to_buf(char *buf, size_t buflen, const char *filepath,
+                             size_t *last_len);
 int         http_extract_validate_header(const char *header_name,
                                          size_t      header_name_len,
                                          const char *expected_value,

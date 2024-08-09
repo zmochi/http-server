@@ -149,7 +149,7 @@ int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
     // requires 3x space allocation)
 
     if ( *bufsize >= max_size ) {
-        return HTTP_ENTITY_TOO_LARGE;
+        return MAX_BUF_SIZE_EXCEEDED;
     }
     *buf     = realloc(*buf, new_size);
     *bufsize = new_size;

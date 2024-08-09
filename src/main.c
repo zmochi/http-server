@@ -195,6 +195,35 @@ int finished_sending(struct client_data *con_data) {
     return 0;
 }
 
+int http_handle_incomplete_req(struct client_data *con_data) {
+    int status;
+    /* if request is incomplete because we reached buffer capacity,
+    realloc: */
+    if ( con_data->recv_buf->bytes_received >= con_data->recv_buf->capacity ) {
+        /* TODO: change handler_buf_realloc signature to be extensible
+        for performance improvements, pass in con_data instead of
+        single buffer */
+        status = handler_buf_realloc(
+            &con_data->recv_buf->buffer, &con_data->recv_buf->capacity,
+            MAX_RECV_BUFFER_SIZE, 2 * con_data->recv_buf->capacity);
+
+        // TODO out of space err in handler_but_realloc
+        switch ( status ) {
+            case HTTP_ENTITY_TOO_LARGE:
+                http_respond_fallback(con_data, Request_Entity_Too_Large);
+                terminate_request(con_data);
+        }
+    }
+
+    return EXIT_SUCCESS;
+}
+
+int http_handle_bad_request(struct client_data *con_data) {
+    http_respond_fallback(con_data, Bad_Request);
+    terminate_request(con_data);
+    return EXIT_SUCCESS;
+}
+
 void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
@@ -206,42 +235,23 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
+        /* parse headers from request */
         status = http_parse_request(con_data);
 
-        if ( status == HTTP_BAD_REQ ) {
-            http_respond_fallback(con_data, Bad_Request);
-            terminate_request(con_data);
-            return;
-        } else if ( status == HTTP_INCOMPLETE_REQ ) {
-
-            // if request is incomplete because we reached buffer capacity,
-            // realloc:
-            if ( con_data->recv_buf->bytes_received >=
-                 con_data->recv_buf->capacity ) {
-                // TODO: change handler_buf_realloc signature to be extensible
-                // for performance improvements, pass in con_data instead of
-                // single buffer
-                status = handler_buf_realloc(
-                    &con_data->recv_buf->buffer, &con_data->recv_buf->capacity,
-                    MAX_RECV_BUFFER_SIZE, 2 * con_data->recv_buf->capacity);
-
-                // TODO out of space err in handler_but_realloc
-                switch ( status ) {
-                    case HTTP_ENTITY_TOO_LARGE:
-                        http_respond_fallback(con_data,
-                                              Request_Entity_Too_Large);
-                        terminate_request(con_data);
-                        return;
-                }
-            }
-            return;
+        switch ( status ) {
+            case HTTP_BAD_REQ:
+                http_handle_bad_request(con_data);
+                return;
+            case HTTP_INCOMPLETE_REQ:
+                http_handle_incomplete_req(con_data);
+                return;
         }
 
         // statusline + headers are complete:
         // populate headers hashmap with pointers to phr_header's
         populate_headers_map(con_data);
+        con_data->recv_buf->headers_parsed = true;
     }
-    con_data->recv_buf->headers_parsed = true;
     con_data->request->message =
         con_data->recv_buf->buffer + con_data->recv_buf->bytes_parsed;
 
@@ -720,7 +730,6 @@ int http_parse_request(struct client_data *con_data) {
         buffer, buffer_len, &request->method, &request->method_len,
         &request->path, &request->path_len, &request->minor_ver,
         request->headers, &request->num_headers, *bytes_parsed);
-    // http_parse_request(&buffer, buffer_len, request, *bytes_parsed);
 
     // switch ( *bytes_parsed ) {
     //     case HTTP_BAD_REQ:             // TODO: Bad request?

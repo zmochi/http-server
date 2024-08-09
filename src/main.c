@@ -248,6 +248,11 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
             case HTTP_INCOMPLETE_REQ:
                 http_handle_incomplete_req(con_data);
                 return;
+            default:
+                LOG_ERR(
+                    "recv_cb: unexpected return value from http_parse_request. "
+                    "terminating server");
+                exit(EXIT_FAILURE);
         }
 
         // statusline + headers are complete:

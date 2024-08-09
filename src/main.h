@@ -132,7 +132,7 @@ void http_respond_fallback(struct client_data *con_data,
 int  populate_headers_map(struct client_data *con_data);
 int  http_respond_notfound(struct client_data *con_data);
 int  reset_con_data(struct client_data *con_data);
-int  terminate_request(struct client_data *con_data);
+int  terminate_connection(struct client_data *con_data);
 struct client_data *init_con_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
 int                 http_parse_request(struct client_data *con_data);

@@ -4,6 +4,9 @@
 #include "status_codes.h"
 #include <sys/socket.h>
 
+/* ##__VA_ARGS__ requires compiling with gcc or clang */
+#define LOG_ERR(fmt, ...) fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
+
 static config server_conf;
 
 #define CLIENT_TIMEOUT_SEC 10
@@ -211,7 +214,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
         switch ( status ) {
             case HTTP_ENTITY_TOO_LARGE:
                 http_respond_fallback(con_data, Request_Entity_Too_Large);
-                terminate_request(con_data);
+                terminate_connection(con_data);
         }
     }
 
@@ -220,7 +223,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 
 int http_handle_bad_request(struct client_data *con_data) {
     http_respond_fallback(con_data, Bad_Request);
-    terminate_request(con_data);
+    terminate_connection(con_data);
     return EXIT_SUCCESS;
 }
 
@@ -252,32 +255,36 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         populate_headers_map(con_data);
         con_data->recv_buf->headers_parsed = true;
     }
+
     con_data->request->message =
         con_data->recv_buf->buffer + con_data->recv_buf->bytes_parsed;
 
-    header_flags = http_extract_validate_header("Host", strlen("Host"),
-                                                HEADER_HOST_EXPECTED,
-                                                strlen(HEADER_HOST_EXPECTED));
+    /* host header is required on HTTP 1.1 */
+    host_header_flags = http_extract_validate_header(
+        "Host", strlen("Host"), HEADER_HOST_EXPECTED,
+        strlen(HEADER_HOST_EXPECTED));
 
-    // require host header on HTTP 1.1
+    /* first condition: only enforce this on HTTP 1.1 */
     if ( con_data->request->minor_ver == 1 &&
-         !(header_flags & (HEADER_EXISTS | HEADER_VALUE_VALID)) ) {
+         !(host_header_flags & (HEADER_EXISTS | HEADER_VALUE_VALID)) ) {
         http_respond_fallback(con_data, Bad_Request);
-        terminate_request(con_data);
+        terminate_connection(con_data);
         return;
     }
 
+    /* continue parsing HTTP message content (or begin parsing if this is the
+     * first time) */
     status = http_parse_content(con_data, &con_data->request->message_length);
 
     if ( status == HTTP_INCOMPLETE_REQ ) {
         return; // wait for more data to become available
     } else if ( status == HTTP_ENTITY_TOO_LARGE ) {
         http_respond_fallback(con_data, Request_Entity_Too_Large);
-        terminate_request(con_data);
+        terminate_connection(con_data);
         return;
     } else if ( status == HTTP_BAD_REQ ) {
         http_respond_fallback(con_data, Bad_Request);
-        terminate_request(con_data);
+        terminate_connection(con_data);
         return;
     }
 
@@ -288,18 +295,18 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
                  con_data->request->method_len) ) {
         // do_GET(con_data); // TODO
         http_respond_fallback(con_data, Method_Not_Allowed);
-        terminate_request(con_data);
+        terminate_connection(con_data);
         return;
     } else {
         // TODO: there are separate codes for method not allowed and method not
         // supported?
         http_respond_fallback(con_data, Method_Not_Allowed);
-        terminate_request(con_data);
+        terminate_connection(con_data);
         return;
     }
 }
 
-int terminate_request(struct client_data *con_data) {
+int terminate_connection(struct client_data *con_data) {
 
     finished_receiving(con_data);
 

@@ -230,7 +230,6 @@ int http_handle_bad_request(struct client_data *con_data) {
 void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
-    short               host_header_flags;
 
     /* receive the waiting data just once. if there's more data to read, recv_cb
      * will be called again */
@@ -261,18 +260,21 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         con_data->recv_buf->headers_parsed = true;
     }
 
+    /* write start address of content (message) to the http request struct in
+     * this connection */
     con_data->request->message =
         con_data->recv_buf->buffer + con_data->recv_buf->bytes_parsed;
 
-    /* host header is required on HTTP 1.1 */
-    host_header_flags =
-        http_extract_validate_header("Host", strlen("Host"), NULL, 0);
+    /* special rules for HTTP 1.1 */
+    if ( con_data->request->minor_ver == 1 ) {
+        /* host header is required on HTTP 1.1 */
+        short host_header_flags =
+            http_extract_validate_header("Host", strlen("Host"), NULL, 0);
 
-    /* first condition: only enforce this on HTTP 1.1 */
-    if ( con_data->request->minor_ver == 1 &&
-         host_header_flags & HEADER_EXISTS ) {
-        http_handle_bad_request(con_data);
-        return;
+        if ( !(host_header_flags & HEADER_EXISTS) ) {
+            http_handle_bad_request(con_data);
+            return;
+        }
     }
 
     /* continue parsing HTTP message content (or begin parsing if this is the

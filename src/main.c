@@ -210,7 +210,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
             &con_data->recv_buf->buffer, &con_data->recv_buf->capacity,
             MAX_RECV_BUFFER_SIZE, 2 * con_data->recv_buf->capacity);
 
-        // TODO out of space err in handler_but_realloc
+        // TODO out of memory err in handler_buf_realloc
         switch ( status ) {
             case HTTP_ENTITY_TOO_LARGE:
                 http_respond_fallback(con_data, Request_Entity_Too_Large);
@@ -782,19 +782,3 @@ int http_parse_request(struct client_data *con_data) {
 
     return 0; // success
 }
-
-// int http_parse_request(char **buffer, size_t buffer_len, http_req
-// *req_struct,
-//                        int bytes_read) {
-//
-//     bytes_read = phr_parse_request(
-//         *buffer, buffer_len, &req_struct->method,
-//         &req_struct->method_len, &req_struct->path,
-//         &req_struct->path_len, &req_struct->minor_ver,
-//         req_struct->headers, &req_struct->num_headers, bytes_read);
-//
-//     // TODO: maybe move method validation and others here, to spare
-//     // receiving and parsing the entire HTTP message before responding?
-//
-//     return bytes_read;
-// }

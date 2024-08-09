@@ -41,7 +41,7 @@
 #define SEND_REALLOC_MULTIPLIER   2
 #define MAX_SEND_BUFFER_SIZE      MAX_RECV_BUFFER_SIZE
 
-struct event_metadata { // TODO: change name to client_ev_metadata
+struct event_data { // TODO: change name to client_ev_data
     struct event_base *base;
     evutil_socket_t    sockfd;
     void              *event_read;
@@ -71,12 +71,12 @@ struct recv_buffer {
 };
 
 struct client_data {
-    struct event_metadata *event;
-    struct send_buffer    *send_buf;
-    struct send_buffer    *last;
-    struct recv_buffer    *recv_buf;
-    http_req              *request;
-    bool                   close_connection;
+    struct event_data  *event;
+    struct send_buffer *send_buf;
+    struct send_buffer *last;
+    struct recv_buffer *recv_buf;
+    http_req           *request;
+    bool                close_connection;
     int (*append_response)(struct client_data *con_data,
                            struct send_buffer *response);
 };
@@ -133,7 +133,7 @@ int  populate_headers_map(struct client_data *con_data);
 int  http_respond_notfound(struct client_data *con_data);
 int  reset_con_data(struct client_data *con_data);
 int  terminate_request(struct client_data *con_data);
-struct client_data *init_con_data(struct event_metadata *ev_metadata);
+struct client_data *init_con_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
 int http_parse_request(char *buffer, size_t buffer_len, http_req *request,
                        ev_ssize_t *bytes_received, ev_ssize_t *bytes_parsed);

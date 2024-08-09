@@ -3,15 +3,16 @@
 #include "http_utils.h"
 #include "status_codes.h"
 #include <sys/socket.h>
-#include <time.h>
 
 static config server_conf;
+
+#define CLIENT_TIMEOUT_SEC 10
 
 int init_server(config conf) {
     struct event_base *base;
     evutil_socket_t    main_sockfd;
     int                status;
-    struct event      *event_read;
+    struct event      *event_accept;
     struct event      *event_write;
 
     server_conf = conf;
@@ -21,19 +22,22 @@ int init_server(config conf) {
 
     main_sockfd = local_socket_bind_listen(server_conf.PORT);
 
-    /* event_self_cbarg uses magic to pass event_read as
+    /* event_self_cbarg uses magic to pass event_accept as
         an argument to the event_new cb function */
-    struct event_metadata event_read_args = {.base = base};
+    struct event_data event_accept_args = {.base = base};
 
-    /* EV_PERSIST allows reading unlimited data from user, or until the
+    /* event_accept is triggered when there's a new connection and calls
+    accept_cb
+     *
+     * EV_PERSIST allows reading unlimited data from user, or until the
     callback function runs event_del */
-    event_read =
+    event_accept =
         event_new(base, main_sockfd, EV_READ | /* EV_WRITE |  */ EV_PERSIST,
-                  accept_cb, &event_read_args);
-    catchExcp(event_read == NULL, "event_new: couldn't initialize read event",
+                  accept_cb, &event_accept_args);
+    catchExcp(event_accept == NULL, "event_new: couldn't initialize read event",
               1);
 
-    status = event_add(event_read, NULL);
+    status = event_add(event_accept, NULL);
     catchExcp(status == -1, "event_add: couldn't add read event",
               1); // TODO: timeout
 
@@ -41,14 +45,13 @@ int init_server(config conf) {
     catchExcp(status == -1, "event_base_loop: couldn't start event loop", 1);
 
     evutil_closesocket(main_sockfd);
-    event_free(event_read);
+    event_free(event_accept);
 
     return 0;
 }
 
-void accept_cb(evutil_socket_t sockfd, short flags, void *event_metadata) {
-    struct event   *event_read;
-    struct event   *event_write;
+void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
+    struct event   *event_read, *event_write;
     struct event   *event_close_con;
     evutil_socket_t incoming_sockfd;
     int             status;
@@ -59,6 +62,8 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_metadata) {
         calloc(1, sizeof(struct sockaddr_storage));
     ev_socklen_t sockaddr_size = sizeof(struct sockaddr_storage);
 
+    /* accept won't block here since accept_cb is called when there's a pending
+     * connection */
     incoming_sockfd =
         accept(sockfd, (struct sockaddr *)sockaddr, &sockaddr_size);
 
@@ -70,11 +75,13 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_metadata) {
     }
 
     evutil_make_socket_nonblocking(incoming_sockfd);
-    //
-    // Initializing connection metadata
+
+    /* Initializing connection data, init_con_data allocates neccesary
+     * memory */
     struct client_data *con_data =
-        init_con_data((struct event_metadata *)event_metadata);
-    struct timeval client_timeout = {.tv_sec = 10, .tv_usec = 0};
+        init_con_data((struct event_data *)event_data);
+    struct timeval client_timeout = {.tv_sec  = CLIENT_TIMEOUT_SEC,
+                                     .tv_usec = 0};
 
     event_read = event_new(con_data->event->base, incoming_sockfd,
                            EV_READ | EV_PERSIST, recv_cb, con_data);
@@ -193,8 +200,11 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     int                 status;
     short               header_flags;
 
+    /* receive the waiting data just once. if there's more data to read, recv_cb
+     * will be called again */
     recv_data(sockfd, con_data);
 
+    /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
         status = http_parse_request(
             con_data->recv_buf->buffer, con_data->recv_buf->capacity,
@@ -545,7 +555,7 @@ int http_respond_notfound(struct client_data *con_data) {
     return 0;
 }
 
-struct client_data *init_con_data(struct event_metadata *event) {
+struct client_data *init_con_data(struct event_data *event) {
     int send_buffer_capacity    = INIT_SEND_BUFFER_CAPACITY;
     int request_buffer_capacity = INIT_BUFFER_SIZE;
 
@@ -576,12 +586,12 @@ struct client_data *init_con_data(struct event_metadata *event) {
 }
 
 int reset_con_data(struct client_data *con_data) {
-    int                    request_buffer_capacity = INIT_BUFFER_SIZE;
-    struct event_metadata *event                   = con_data->event;
-    http_req              *req_data                = con_data->request;
-    struct send_buffer    *send_buf                = con_data->send_buf;
-    struct recv_buffer    *recv_buf                = con_data->recv_buf;
-    struct send_buffer    *last                    = con_data->last;
+    int                 request_buffer_capacity = INIT_BUFFER_SIZE;
+    struct event_data  *event                   = con_data->event;
+    http_req           *req_data                = con_data->request;
+    struct send_buffer *send_buf                = con_data->send_buf;
+    struct recv_buffer *recv_buf                = con_data->recv_buf;
+    struct send_buffer *last                    = con_data->last;
 
     // we prefer to free the data and then call calloc() rather than zero
     // out existing data since the buffer since may be bigger than the

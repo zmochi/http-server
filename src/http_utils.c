@@ -1,6 +1,5 @@
 #include "http_utils.h"
 #include "headers.h"
-#include "status_codes.h"
 
 int strftime_gmtformat(char *buf, size_t buflen) {
 

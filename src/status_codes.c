@@ -1,10 +1,12 @@
 #include "status_codes.h"
 
-struct status_codes_storage status_codes = {
-    .size          = 199,
-    .smallest_code = 100,
-    .storage       = status_codes_arr,
-};
+const int   smallest_code = 100;
+const int   num_codes     = 199;
+const char *status_codes_arr[];
+
+const char *stringify_statuscode(http_status_code status_code) {
+    return status_codes_arr[status_code - smallest_code];
+}
 
 const char *status_codes_arr[] = {
     // code: 100

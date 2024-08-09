@@ -135,13 +135,13 @@ int  reset_con_data(struct client_data *con_data);
 int  terminate_request(struct client_data *con_data);
 struct client_data *init_con_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
-int http_parse_request(char *buffer, size_t buffer_len, http_req *request,
-                       ev_ssize_t *bytes_received, ev_ssize_t *bytes_parsed);
-int http_parse_content(struct client_data *con_data, size_t *content_length);
-int http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
-                                size_t buffer_len, http_req *http_request,
-                                ev_ssize_t *bytes_received,
-                                ev_ssize_t *bytes_parsed);
-int finished_sending(struct client_data *con_data);
-int finished_receiving(struct client_data *con_data);
+int                 http_parse_request(struct client_data *con_data);
+int  http_parse_content(struct client_data *con_data, size_t *content_length);
+int  http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
+                                 size_t buffer_len, http_req *http_request,
+                                 ev_ssize_t *bytes_received,
+                                 ev_ssize_t *bytes_parsed);
+int  finished_sending(struct client_data *con_data);
+int  finished_receiving(struct client_data *con_data);
+void close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
 #endif /* __MAIN_H */

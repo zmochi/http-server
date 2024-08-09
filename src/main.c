@@ -206,10 +206,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
-        status = http_parse_request(
-            con_data->recv_buf->buffer, con_data->recv_buf->capacity,
-            con_data->request, &con_data->recv_buf->bytes_received,
-            &con_data->recv_buf->bytes_parsed);
+        status = http_parse_request(con_data);
 
         if ( status == HTTP_BAD_REQ ) {
             http_respond_fallback(con_data, Bad_Request);
@@ -710,9 +707,12 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
  * -2 on incomplete HTTP request
  * TODO: simplify code
  */
-int http_parse_request(char *buffer, size_t buffer_len, http_req *request,
-                       ev_ssize_t *bytes_received, ev_ssize_t *bytes_parsed) {
-
+int http_parse_request(struct client_data *con_data) {
+    char       *buffer        = con_data->recv_buf->buffer;
+    size_t      buffer_len    = con_data->recv_buf->capacity;
+    http_req   *request       = con_data->request;
+    ev_ssize_t *byte_received = &con_data->recv_buf->bytes_received;
+    ev_ssize_t *bytes_parsed  = &con_data->recv_buf->bytes_parsed;
     // http_parse_request (Or actually phr_parse_request that is called from
     // it) returns the *total* length of the HTTP request line + headers for
     // each call, so for each iteration we use = instead of +=

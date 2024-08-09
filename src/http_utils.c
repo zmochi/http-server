@@ -84,7 +84,7 @@ int populate_headers_map(struct client_data *con_data) {
 
 int http_extract_validate_header(const char *restrict header_name,
                                  size_t header_name_len,
-                                 char *restrict expected_value,
+                                 const char *restrict expected_value,
                                  size_t expected_value_len) {
     short              header_flags = 0;
     struct phr_header *header =
@@ -92,8 +92,11 @@ int http_extract_validate_header(const char *restrict header_name,
 
     if ( header != NULL ) {
         header_flags |= HEADER_EXISTS;
-        if ( strncmp(header->value, expected_value, expected_value_len) ) {
-            header_flags |= (HEADER_VALUE_VALID);
+
+        /* if header exists we can check its value: */
+        if ( expected_value != NULL && /* expected value was passed */
+             strncmp(header->value, expected_value, expected_value_len) == 0 ) {
+            header_flags |= HEADER_VALUE_VALID;
         }
     }
 
@@ -102,11 +105,6 @@ int http_extract_validate_header(const char *restrict header_name,
 
 int http_extract_content_length(size_t *content_length_storage,
                                 size_t  max_content_length) {
-
-    // check if we already got the content length
-    if ( content_length_storage != 0 ) {
-        return HEADER_EXISTS | HEADER_VALUE_VALID;
-    }
 
     short              header_flags = 0;
     struct phr_header *header_content_len =

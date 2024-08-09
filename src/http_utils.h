@@ -15,8 +15,9 @@ int              local_socket_bind_listen(const char *port);
 int         load_file_to_buf(char *buf, size_t buflen, size_t *bytes_written,
                              const char *filepath, size_t last_len);
 int         http_extract_validate_header(const char *header_name,
-                                         size_t header_name_len, char *expected_value,
-                                         size_t expected_value_len);
+                                         size_t      header_name_len,
+                                         const char *expected_value,
+                                         size_t      expected_value_len);
 int         http_extract_content_length(size_t *content_length_storage,
                                         size_t  max_content_length);
 int         handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,

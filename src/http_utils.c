@@ -10,16 +10,28 @@ int strftime_gmtformat(char *buf, size_t buflen) {
     return strftime(buf, buflen, "%a, %d %b %Y %H:%M:%S GMT", tm_info);
 }
 
-const char *stringify_statuscode(http_status_code status_code) {
-    return status_codes.storage[status_code - status_codes.smallest_code];
-}
-
-// TODO: writing buflen - last_len size is too much, need to get size with fseek
-int load_file_to_buf(char *buf, size_t buflen, size_t *bytes_written,
-                     const char *filepath, size_t last_len) {
-    FILE  *message_file = fopen(filepath, "r");
-    size_t ret;
-    size_t message_file_size;
+/**
+ * @brief reads file at @filepath to @buf with capacity @buf_capacity, adds null
+ * byte at end of read caller should repeatedly call this function until 0 is
+ * returned to indicate end of file. at each call, caller should provide
+ * last_len which is the number of bytes read by this function so far
+ *
+ * @param buf buffer to load file contents into
+ * @param buf_capacity buffer capacity
+ * @param filepath path to file
+ * @param last_len size_t variable for internal use by the function. should be 0
+ * on first call and passed to the function unchanged on every following call
+ * @return number of bytes read in this call to the function, or -1 if an error
+ * occurred
+ */
+ev_ssize_t load_file_to_buf(char *restrict buf, size_t             buf_capacity,
+                            const char *restrict filepath, size_t *last_len) {
+    /* would prefer to mmap() file into memory but not cross-compatible that
+     * way... */
+    FILE *message_file = fopen(filepath, "r");
+    /* -1 on @capacity to make space for null byte at end */
+    size_t ret, message_file_size, capacity = buf_capacity - 1,
+                                   last = *last_len;
 
     if ( !message_file ) {
         fprintf(stderr, "load_file_to_buf: couldn't open file at path %s",
@@ -27,27 +39,21 @@ int load_file_to_buf(char *buf, size_t buflen, size_t *bytes_written,
         return -1;
     }
 
-    fseek(message_file, 0, SEEK_END);
-    message_file_size = ftell(message_file);
-    ret               = fseek(message_file, last_len, SEEK_SET);
+    ret = fread(buf + last, capacity - last, sizeof(char), message_file);
 
-    if ( ret != 0 ) {
-        return -1;
-    }
-
-    ret = fread(buf + last_len, 1, buflen - last_len, message_file);
-
-    if ( ret <= 0 ) {
+    if ( ret < capacity - last ) {
         if ( ferror(message_file) ) {
+            perror("load_file_to_buf: fread: ");
             return -1;
         } else if ( feof(message_file) ) {
-            *bytes_written += ret;
-            return 0; // success - reached eof
+            /* reached EOF, add null byte */
+            buf[last + ret + 1] = '\0';
+            return 0;
         }
     }
 
-    // haven't reached EOF
-    *bytes_written += ret;
+    /* haven't reached EOF */
+    *last_len += ret;
     return ret;
 }
 

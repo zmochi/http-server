@@ -2,14 +2,48 @@
 #include "headers.h"
 #include "http_utils.h"
 #include "status_codes.h"
-#include <sys/socket.h>
 
 /* ##__VA_ARGS__ requires compiling with gcc or clang */
+#define LOG(fmt, ...)     printf("LOG:" fmt "\n", ##__VA_ARGS__)
 #define LOG_ERR(fmt, ...) fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
 
 static config server_conf;
 
-#define CLIENT_TIMEOUT_SEC 10
+int CLIENT_TIMEOUT_SEC;
+
+const char *HTTP_RESPONSE_BASE_FMT = "HTTP/1.%d %d %s\r\n"
+                                     "Server: %s\r\n"
+                                     "Date: %s\r\n";
+
+void accept_cb(evutil_socket_t, short, void *);
+void send_cb(evutil_socket_t sockfd, short flags, void *arg);
+/**
+ * @brief Callback function to read data sent from client.
+ *
+ * After the connection is established (via `accept()` and the accept_cb()
+ * callback function), the client may send data. This function receives the
+ * data and closes the connection. Signature matches the required signature
+ * for callback function in documentation of `event_new()`.
+ */
+void recv_cb(evutil_socket_t, short, void *);
+void close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
+int  recv_data(evutil_socket_t sockfd, struct client_data *con_data);
+int  http_respond(struct client_data *con_data, http_res *response);
+void http_respond_fallback(struct client_data *con_data,
+                           http_status_code    status_code);
+int  populate_headers_map(struct client_data *con_data);
+int  reset_con_data(struct client_data *con_data);
+int  terminate_connection(struct client_data *con_data);
+struct client_data *init_con_data(struct event_data *ev_data);
+int                 close_connection(struct client_data *con_data);
+int                 http_parse_request(struct client_data *con_data);
+int  http_parse_content(struct client_data *con_data, size_t *content_length);
+int  http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
+                                 size_t buffer_len, http_req *http_request,
+                                 ev_ssize_t *bytes_received,
+                                 ev_ssize_t *bytes_parsed);
+bool finished_sending(struct client_data *con_data);
+int  finished_receiving(struct client_data *con_data);
 
 int init_server(config conf) {
     struct event_base *base;
@@ -18,7 +52,8 @@ int init_server(config conf) {
     struct event      *event_accept;
     struct event      *event_write;
 
-    server_conf = conf;
+    server_conf        = conf;
+    CLIENT_TIMEOUT_SEC = conf.timeout;
 
     base = event_base_new();
     catchExcp(base == NULL, "Couldn't open event base.", 1);
@@ -97,7 +132,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
               1);
 
     event_close_con = event_new(con_data->event->base, incoming_sockfd,
-                                EV_TIMEOUT | EV_WRITE, close_con_cb, con_data);
+                                EV_TIMEOUT, close_con_cb, con_data);
     catchExcp(event_close_con == NULL,
               "event_new: couldn't initialize close-connection event", 1);
 
@@ -133,19 +168,19 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
 void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
-    struct client_data *con_data    = (struct client_data *)arg;
-    size_t              nbytes      = 0;
-    size_t              total_bytes = 0;
+    struct client_data *con_data = (struct client_data *)arg;
 
-    printf("send_cb! actual_len = %lu\n", con_data->send_buf->actual_len);
+    // printf("send_cb! actual_len = %lu\n", con_data->send_buf->actual_len);
 
-    if ( con_data->send_buf->actual_len == 0 ) {
+    if ( con_data->send_buf == NULL )
+        /* nothing to send */
         return;
-    }
 
-    nbytes = send(
-        sockfd, con_data->send_buf->buffer + con_data->send_buf->bytes_sent,
-        con_data->send_buf->actual_len - con_data->send_buf->bytes_sent, 0);
+    struct send_buffer send_buf = *(con_data->send_buf);
+    size_t             nbytes = 0, total_bytes = 0;
+
+    nbytes = send(sockfd, send_buf.buffer + send_buf.bytes_sent,
+                  send_buf.actual_len - send_buf.bytes_sent, 0);
 
     if ( nbytes == SOCKET_ERROR ) { // TODO: better error handling
         fprintf(stderr, "send: %s\n",
@@ -155,12 +190,11 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     printf("sent!");
 
-    if ( nbytes ==
-         con_data->send_buf->actual_len - con_data->send_buf->bytes_sent ) {
+    if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
         // all data sent
-        finished_sending(con_data);
-    } else if ( nbytes < con_data->send_buf->actual_len -
-                             con_data->send_buf->bytes_sent ) {
+        if ( finished_sending(con_data) )
+            close_connection(con_data);
+    } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
     } else {
@@ -169,33 +203,23 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
     }
 }
 
-int finished_sending(struct client_data *con_data) {
-    struct send_buffer *next = con_data->send_buf->next;
+bool finished_sending(struct client_data *con_data) {
 
     catchExcp(con_data->send_buf == NULL || con_data->send_buf->buffer == NULL,
               "finished_sending: critical error, no send_buf found\n", 1);
 
+    struct send_buffer *next = con_data->send_buf->next;
+
     free(con_data->send_buf->buffer);
     free(con_data->send_buf);
 
+    /* if there is another buffer to be queued */
     if ( next != NULL ) {
         con_data->send_buf = con_data->send_buf->next;
+        return false;
     } else {
-        // initialize empty buffer
-        // TODO: probably don't need to free and allocate, just realloc to INIT
-        // size and set actual_len to 0 so we don't send this again. On
-        // next write actual_len will be updated and contents overwritten.
-        // probably potential vulnerability :)))
-
-        con_data->send_buf = calloc(1, sizeof(*con_data->send_buf));
-        con_data->send_buf->buffer =
-            calloc(INIT_SEND_BUFFER_CAPACITY, sizeof(char));
-        con_data->send_buf->capacity   = INIT_SEND_BUFFER_CAPACITY;
-        con_data->send_buf->bytes_sent = 0;
-        con_data->send_buf->actual_len = 0;
+        return true;
     }
-
-    return 0;
 }
 
 int http_handle_incomplete_req(struct client_data *con_data) {
@@ -212,7 +236,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 
         // TODO out of memory err in handler_buf_realloc
         switch ( status ) {
-            case HTTP_ENTITY_TOO_LARGE:
+            case MAX_BUF_SIZE_EXCEEDED:
                 http_respond_fallback(con_data, Request_Entity_Too_Large);
                 terminate_connection(con_data);
         }
@@ -223,7 +247,6 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 
 int http_handle_bad_request(struct client_data *con_data) {
     http_respond_fallback(con_data, Bad_Request);
-    terminate_connection(con_data);
     return EXIT_SUCCESS;
 }
 
@@ -288,7 +311,6 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
         case HTTP_ENTITY_TOO_LARGE:
             http_respond_fallback(con_data, Request_Entity_Too_Large);
-            terminate_connection(con_data);
             return;
 
         case HTTP_BAD_REQ:
@@ -396,78 +418,84 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
     return 0;
 }
 
+/**
+ * @brief [TODO:description]
+ * after this functions returns, it is safe to free all data related to
+ * @response and @response itself
+ *
+ * @param con_data [TODO:parameter]
+ * @param response [TODO:parameter]
+ * @return [TODO:return]
+ */
 int http_respond(struct client_data *con_data, http_res *response) {
+    /* the struct send_buffer and associated buffer will be free'd in send_cb */
     struct send_buffer *new_send_buf = calloc(1, sizeof(*new_send_buf));
-    new_send_buf->buffer   = calloc(INIT_SEND_BUFFER_CAPACITY, sizeof(char));
+    catchExcp(new_send_buf == NULL, "http_respond: calloc", 1);
+    new_send_buf->buffer   = malloc(INIT_SEND_BUFFER_CAPACITY);
     new_send_buf->capacity = INIT_SEND_BUFFER_CAPACITY;
+    /* INIT_SEND_BUFFER_CAPACITY must be big enough for HTTP_RESPONSE_BASE_FMT
+     * after its been formatted */
+    catchExcp(new_send_buf->buffer == NULL, "http_respond: malloc", 1);
 
-    char   date[128]; // temporary buffer to pass date string
-    int    status_code = response->status_code;
-    int    status;
-    size_t bytes_written = 0;
-    size_t buflen;
-    size_t ret;
+    char       date[128]; // temporary buffer to pass date string
+    int        status_code = response->status_code;
+    int        status;
+    size_t     ret, buflen, bytes_written = 0;
+    ev_ssize_t string_len;
 
     ret = strftime_gmtformat(date, sizeof(date));
     catchExcp(ret <= 0, "strftime_gmtformat: couldn't write date into buffer",
               1);
 
-start:
     buflen = new_send_buf->capacity;
 
     ret =
-        snprintf(new_send_buf->buffer, buflen,
-                 "HTTP/1.%d %d %s\r\n"
-                 "Server: %s\r\n"
-                 "Date: %s",
+        snprintf(new_send_buf->buffer, buflen, HTTP_RESPONSE_BASE_FMT,
                  con_data->request->minor_ver, status_code,
-                 status_codes.storage[status_code - status_codes.smallest_code],
-                 server_conf.SERVNAME, date);
+                 stringify_statuscode(status_code), server_conf.SERVNAME, date);
 
     if ( ret >= buflen ) {
-        // con_data->send_buffer =
-        //     realloc(con_data->send_buffer, SEND_REALLOC_MULTIPLIER *
-        //     buflen);
-        // handler_buf_realloc(&con_data->send_buffer,
-        // &con_data->send_buffer_size,
-        //                     MAX_SEND_BUFFER_SIZE,
-        //                     SEND_REALLOC_MULTIPLIER * buflen);
-        if ( handler_buf_realloc(&new_send_buf->buffer, &new_send_buf->capacity,
-                                 MAX_SEND_BUFFER_SIZE,
-                                 SEND_REALLOC_MULTIPLIER * buflen) == -1 ) {
-            http_respond_fallback(con_data, Server_Error);
-            return -1;
-        }
-        goto start;
+        LOG_ERR("http_respond: Initial capacity of send buffer is not big "
+                "enough for the base HTTP response format");
+        /* this really shouldn't happen and is fixable by simply increasing the
+         * initial capacity, so just exit */
+        exit(EXIT_FAILURE);
     }
 
     bytes_written += ret;
+
+    static const char *HEADER_FMT = "%s: %s\r\n";
 
     // copy headers to send buffer:
     for ( struct http_header *header = response->first_header; header != NULL;
           header                     = header->next ) {
         ret = snprintf(new_send_buf->buffer + bytes_written,
-                       new_send_buf->capacity, "%s\r\n", header->header);
+                       new_send_buf->capacity - bytes_written, HEADER_FMT,
+                       header->header_name, header->header_value);
 
-        if ( ret >= header->header_len + 1 ) { // out of memory
-            // TODO: realloc send_buffer?
+        /* the last strlen() is the characters always present in a header */
+        string_len = strlen(header->header_name) +
+                     strlen(header->header_value) + strlen(": \r\n");
+
+        if ( ret >= string_len ) { // out of memory
+            // TODO: realloc send buffer
+        } else if ( ret < 0 ) {
+            LOG_ERR("http_respond: snprintf: headers");
+            exit(1);
         }
 
         bytes_written += ret;
     }
 
-    ret = 0;
-
     // load contents of file to buffer, reallocate and keep loading from
     // last place if needed:
-    while ( (ret = load_file_to_buf(new_send_buf->buffer + bytes_written,
+    /* while ( (ret = load_file_to_buf(new_send_buf->buffer + bytes_written,
                                     buflen - bytes_written, &bytes_written,
                                     response->filepath, ret) > 0) ) {
         if ( ret == -1 ) {
-            http_respond_fallback(
-                con_data,
-                404); // TODO: this could trigger when fseek fails OR when
-                      // file couldn't be opened, needs improvement
+            // TODO: this could trigger when fseek fails OR when file couldn't
+            // be opened, needs improvement
+            http_respond_fallback(con_data, Not_Found);
             return -1;
         }
 
@@ -483,71 +511,118 @@ start:
                 // TODO
                 break;
         }
+    } */
+
+    if ( response->message != NULL ) {
+        ret = snprintf(new_send_buf->buffer + bytes_written,
+                       new_send_buf->capacity - bytes_written, "%s\r\n",
+                       response->message);
+
+        string_len = strlen(response->message);
+
+        // memcpy(new_send_buf->buffer + bytes_written, response->message,
+        // string_len)
+
+        if ( ret >= string_len ) { // out of memory
+            // TODO: realloc send_buffer?
+        } else if ( ret < 0 ) {
+            LOG_ERR("http_respond: snprintf: response->message");
+            exit(1);
+        }
+
+        bytes_written += ret;
     }
 
     new_send_buf->actual_len = bytes_written;
+
+    con_data->append_response(con_data, new_send_buf);
+
     return 0;
 }
 
+void http_header_init(struct http_header *header, const char *header_name,
+                      const char *header_value, struct http_header *next) {
+    header->header_name  = header_name;
+    header->header_value = header_value;
+    header->next         = next;
+}
+
+void http_free_response_headers(http_res *response) {
+    struct http_header *next, *header = response->first_header;
+
+    while ( header != NULL ) {
+        next = header->next;
+        free(header);
+        header = next;
+    }
+}
+
+/**
+ * @brief sends default response for the specified @status_code
+ * the response for status code XXX is expected to be found in the root folder
+ * specified in config, under the name XXX.html
+ *
+ * @param con_data client to send response to
+ * @param status_code status code of the response
+ */
 void http_respond_fallback(struct client_data *con_data,
                            http_status_code    status_code) {
-    size_t send_buffer_capacity =
-        INIT_SEND_BUFFER_CAPACITY; // TODO pls and add checks for NULL
+    size_t       send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
+    const size_t MAX_FILE_READ_SIZE   = 1 << 27;
+    int          status;
+    size_t       msg_bytes_written;
+    size_t       last_len;
+    char         message_filepath[256];
 
-    struct send_buffer *response = calloc(1, sizeof(struct send_buffer));
-    response->buffer             = malloc(send_buffer_capacity);
-    // we don't need to zero out the memory in response->buffer since
-    // snprintf ahead already append a null byte to end of string
-    catchExcp(response == NULL, "calloc: couldn't allocate send buffer", 1);
-    catchExcp(response->buffer == NULL, "calloc: couldn't allocate send buffer",
-              1);
+    /* to be free'd in send_cb, after sending its contents */
+    char *buffer = malloc(send_buffer_capacity);
+    catchExcp(buffer == NULL, "malloc: couldn't allocate send buffer", 1);
 
-    int    bytes_written;
-    size_t msg_bytes_written;
-    size_t last_len;
-    char   date[128];
-    char   message[1024];
-    char   message_filepath[128];
+    /* first_header to be freed at the end of this function */
+    http_res response = {.status_code  = status_code,
+                         .message      = buffer,
+                         .first_header = malloc(sizeof(struct http_header))};
 
-    response->buffer   = malloc(128);
-    response->capacity = 128;
+    http_header_init(response.first_header, "Connection", "Close", NULL);
 
-    bytes_written = snprintf(message_filepath, sizeof(message_filepath),
-                             "%s/%d.html", server_conf.ROOT_PATH, status_code);
-    printf("sending error from filename: %s/%d.html\n", server_conf.ROOT_PATH,
-           status_code);
-    catchExcp(bytes_written >= sizeof(message_filepath),
+    /* create path string of HTTP response with provided status code */
+    msg_bytes_written =
+        snprintf(message_filepath, sizeof(message_filepath), "%s/%d.html",
+                 server_conf.ROOT_PATH, status_code);
+    LOG("sending error from filename: %s/%d.html", server_conf.ROOT_PATH,
+        status_code);
+    catchExcp(msg_bytes_written >= strlen(message_filepath),
               "http_respond_fallback:\n\tsnprintf: couldn't write html "
               "filename to buffer\n",
               1);
 
-    // TODO: loop and check return code
-    load_file_to_buf(message, sizeof(message), &msg_bytes_written,
-                     message_filepath, last_len);
+    while ( (msg_bytes_written =
+                 load_file_to_buf(buffer, send_buffer_capacity,
+                                  message_filepath, &last_len)) > 0 ) {
+        /* resize buffer as needed, if file hasn't been fully read */
+        status =
+            handler_buf_realloc(&buffer, &send_buffer_capacity,
+                                MAX_FILE_READ_SIZE, send_buffer_capacity * 2);
 
-    bytes_written = strftime_gmtformat(date, sizeof(date));
-    catchExcp(bytes_written <= 0,
-              "http_respond_fallback:\n\tstrftime_gmtformat: couldn't write "
-              "date in fallback response",
-              1);
+        /* switch for extensibility */
+        switch ( status ) {
+            case MAX_BUF_SIZE_EXCEEDED:
+                LOG_ERR(
+                    "http_respond_fallback: file at %s exceeds max read size",
+                    message_filepath);
+                goto exit_while;
+        }
+    }
 
-    bytes_written = snprintf(response->buffer, response->capacity,
-                             "HTTP/1.1 %d %s\r\n"
-                             "Server: %s\r\n"
-                             "Date: %s\r\n\r\n"
-                             "%s",
-                             status_code, stringify_statuscode(status_code),
-                             server_conf.SERVNAME, date, message);
+    if ( msg_bytes_written < 0 ) {
+        LOG_ERR("http_respond_fallback: error in load_file_to_buf");
+        exit(1);
+    }
 
-    catchExcp(
-        bytes_written >= response->capacity,
-        "http_respond_fallback:\n\tsnprintf: couldn't write to send buffer", 1);
+exit_while:
 
-    response->actual_len = bytes_written;
-    printf("send buffer contains:\n%s\nsend_buffer_capacity: %lu\n",
-           response->buffer, response->capacity);
-
-    con_data->append_response(con_data, response);
+    http_respond(con_data, &response);
+    http_free_response_headers(&response);
 }
 
 int append_response(struct client_data *con_data,
@@ -555,29 +630,16 @@ int append_response(struct client_data *con_data,
     size_t send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
 
     if ( con_data->send_buf == NULL ) {
+        /* send queue empty, make response first */
         con_data->send_buf = response;
         con_data->last     = con_data->send_buf;
     } else {
+        /* append the provided response to the queue of stuff to send */
         con_data->last->next = response;
         con_data->last       = response;
     }
-    return 0;
-}
 
-int http_respond_notfound(struct client_data *con_data) {
-    http_res response = {
-        .num_headers  = 0,
-        .first_header = NULL,
-        .last_header  = NULL,
-        .status_code  = 404,
-    };
-
-    char filepath[strlen(server_conf.ROOT_PATH) + strlen("/404.html") + 1];
-    sprintf(filepath, "%s%s", server_conf.ROOT_PATH, "/404.html");
-
-    response.filepath = filepath;
-
-    http_respond(con_data, &response);
+    response->next = NULL;
 
     return 0;
 }

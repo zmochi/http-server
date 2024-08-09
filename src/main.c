@@ -230,7 +230,7 @@ int http_handle_bad_request(struct client_data *con_data) {
 void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
-    short               header_flags;
+    short               host_header_flags;
 
     /* receive the waiting data just once. if there's more data to read, recv_cb
      * will be called again */
@@ -260,15 +260,13 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         con_data->recv_buf->buffer + con_data->recv_buf->bytes_parsed;
 
     /* host header is required on HTTP 1.1 */
-    host_header_flags = http_extract_validate_header(
-        "Host", strlen("Host"), HEADER_HOST_EXPECTED,
-        strlen(HEADER_HOST_EXPECTED));
+    host_header_flags =
+        http_extract_validate_header("Host", strlen("Host"), NULL, 0);
 
     /* first condition: only enforce this on HTTP 1.1 */
     if ( con_data->request->minor_ver == 1 &&
-         !(host_header_flags & (HEADER_EXISTS | HEADER_VALUE_VALID)) ) {
-        http_respond_fallback(con_data, Bad_Request);
-        terminate_connection(con_data);
+         host_header_flags & HEADER_EXISTS ) {
+        http_handle_bad_request(con_data);
         return;
     }
 
@@ -276,16 +274,23 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
      * first time) */
     status = http_parse_content(con_data, &con_data->request->message_length);
 
-    if ( status == HTTP_INCOMPLETE_REQ ) {
-        return; // wait for more data to become available
-    } else if ( status == HTTP_ENTITY_TOO_LARGE ) {
-        http_respond_fallback(con_data, Request_Entity_Too_Large);
-        terminate_connection(con_data);
-        return;
-    } else if ( status == HTTP_BAD_REQ ) {
-        http_respond_fallback(con_data, Bad_Request);
-        terminate_connection(con_data);
-        return;
+    switch ( status ) {
+        case HTTP_INCOMPLETE_REQ:
+            return; // wait for more data to become available
+
+        case HTTP_ENTITY_TOO_LARGE:
+            http_respond_fallback(con_data, Request_Entity_Too_Large);
+            terminate_connection(con_data);
+            return;
+
+        case HTTP_BAD_REQ:
+            http_handle_bad_request(con_data);
+            return;
+
+        default:
+            LOG_ERR("recv_cb: unexpected return value from http_parse_content. "
+                    "terminating server");
+            exit(EXIT_FAILURE);
     }
 
     // if-else statements for methods instead of hash/switch statements simply
@@ -649,20 +654,37 @@ int finished_receiving(struct client_data *con_data) {
  * @return HTTP_INCOMPLETE_REQ when the Content-Length header value < bytes
  * received via recv
  * HTTP_ENTITY_TOO_LARGE when the user-specified Content-Length is bigger
- * than maximum recv buffer size HTTP_BAD_REQ if the Content-Length header
- * has an invalid value.
+ * than maximum recv buffer size
+ * HTTP_BAD_REQ if the Content-Length header has an invalid value.
  */
 int http_parse_content(struct client_data *con_data, size_t *content_length) {
+    short content_length_header_flags;
 
-    short header_flags = http_extract_content_length(
-        content_length,
-        MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_parsed);
+    /* WARNING: processing user input and using user-provided value
+     *
+     * http_extract_content_length validates the Content-Length header from user
+     * and puts its value in content_length
+     */
 
-    if ( header_flags & HEADER_EXISTS ) {
-        if ( header_flags & HEADER_VALUE_VALID ) {
+    /* check if we already got the content length */
+    if ( *content_length != 0 ) {
+        content_length_header_flags = HEADER_EXISTS | HEADER_VALUE_VALID;
+    } else {
+        content_length_header_flags = http_extract_content_length(
+            content_length,
+            MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_parsed);
+    }
 
-            // this call can be optimized since we don't need to reallocate
-            // space for request line + headers
+    if ( content_length_header_flags & HEADER_EXISTS ) {
+        /* if user-provided Content-Length header has a valid value */
+        if ( content_length_header_flags & HEADER_VALUE_VALID ) {
+
+            /* resize buffer if necessary (handler_buf_realloc does not resize
+            if unnecessary)
+             *
+             * this call can be optimized since we don't need to reallocate
+            space for request line + headers
+             */
             handler_buf_realloc(
                 &con_data->recv_buf->buffer, &con_data->recv_buf->capacity,
                 MAX_RECV_BUFFER_SIZE,
@@ -673,16 +695,16 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
                 return HTTP_INCOMPLETE_REQ;
             }
 
-            // we choose to trust the user-supplied Content-Length value
-            // here as long as its smaller than the maximum buffer size.
-            // this might pose a problem if the recv_buffer wasn't cleared
-            // somehow for this connection, but this shouldn't happen.
+            /* we choose to trust the user-supplied Content-Length value
+            here as long as its smaller than the maximum buffer size.
+            this might pose a problem if the recv_buffer wasn't cleared
+            somehow for this connection, but this shouldn't happen. */
             con_data->recv_buf->bytes_parsed += *content_length;
             con_data->recv_buf->content_parsed = true;
 
             return 0;
-        } else { // Invalid Content-Length value
-            if ( header_flags & HEADER_VALUE_EXCEEDS_MAX ) {
+        } else { /* Invalid Content-Length value */
+            if ( content_length_header_flags & HEADER_VALUE_EXCEEDS_MAX ) {
                 return HTTP_ENTITY_TOO_LARGE;
             } else {
                 return HTTP_BAD_REQ;
@@ -691,20 +713,21 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
     }
 
     // TODO: define http_extract_transfer_encoding
-    header_flags = http_extract_validate_header("Transfer-Encoding",
-                                                strlen("Transfer-Encoding"),
-                                                "chunked", strlen("chunked"));
+    content_length_header_flags = http_extract_validate_header(
+        "Transfer-Encoding", strlen("Transfer-Encoding"), "chunked",
+        strlen("chunked"));
 
-    if ( header_flags & HEADER_EXISTS && header_flags & HEADER_VALUE_VALID ) {
+    if ( content_length_header_flags & HEADER_EXISTS &&
+         content_length_header_flags & HEADER_VALUE_VALID ) {
         // TODO: procedure for transfer encoding
     } else { // no content / invalid header value
 
         // RFC 2616, 3.6.1, ignore Transfer-Encoding's the server doesn't
-        // understand, so we don't terminate on invalid header value
+        // understand, so don't terminate on invalid header value
         con_data->recv_buf->content_parsed = true;
     }
 
-    return 0; // success
+    return EXIT_SUCCESS;
 }
 
 /** TODO: fix documentation

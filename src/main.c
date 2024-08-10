@@ -141,15 +141,28 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
     catchExcp(status == -1, "event_add: couldn't add close-connection event",
               1);
 
-    con_data->event->event_read  = event_read;
-    con_data->event->event_write = event_write;
-    con_data->event->sockfd      = incoming_sockfd;
+    con_data->event->event_read      = event_read;
+    con_data->event->event_write     = event_write;
+    con_data->event->event_close_con = event_close_con;
+    con_data->event->sockfd          = incoming_sockfd;
 
     free(sockaddr);
 }
 
+/**
+ * @brief callback function for when a connection times out OR when all data is
+ * sent and close_connection flag is set in client_data struct
+ *
+ *
+ * @param sockfd socket of connection
+ * @param flags libevent flags
+ * @param arg libevent argument
+ */
 void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
+    LOG("close_con_cb");
     struct client_data *con_data        = (struct client_data *)arg;
+    struct recv_buffer *recv_buf        = con_data->recv_buf;
+    struct send_buffer *send_buf        = con_data->send_buf;
     bool                timed_out       = flags & EV_TIMEOUT;
     bool                close_requested = con_data->close_connection;
     bool                send_buf_empty  = con_data->send_buf == NULL;
@@ -157,17 +170,53 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     if ( !(close_requested || timed_out) && !send_buf_empty ) {
         return;
     }
+    /* free recv buffer if not free'd already */
+    if ( recv_buf != NULL )
+        finished_receiving(con_data);
+    /* free send buffers (and discard data to be sent) if connection timed out
+     */
+    if ( send_buf != NULL )
+        // if ( timed_out )
+        /* each call to finished_sending frees the next buffer in queue of
+         * responses to be sent, when `true` is returned, there is nothing
+         * more to free */
+        while ( !finished_sending(con_data) )
+            ;
 
     // TODO: close connection
+    event_free(con_data->event->event_write);
+    event_free(con_data->event->event_read);
+    event_free(con_data->event->event_close_con);
+
+    evutil_closesocket(con_data->event->sockfd);
+
+    if ( !(con_data->request == NULL) )
+        free(con_data->request);
+    else {
+        LOG_ERR("close_con_cb: request is NULL when closing connection!");
+        exit(EXIT_FAILURE);
+    }
+
+    if ( !(con_data == NULL) )
+        free(con_data);
+    else {
+        LOG_ERR("close_con_cb: con_data is NULL when closing connection!");
+        exit(EXIT_FAILURE);
+    }
 }
 
 void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
+    LOG("send_cb");
 
     struct client_data *con_data = (struct client_data *)arg;
 
     // printf("send_cb! actual_len = %lu\n", con_data->send_buf->actual_len);
 
-    if ( con_data->send_buf == NULL )
+    if ( con_data->close_connection && con_data->send_buf == NULL ) {
+        // event_active(con_data->event->event_close_con, 0, 0);
+        terminate_connection(con_data);
+        return;
+    } else if ( con_data->send_buf == NULL )
         /* nothing to send */
         return;
 
@@ -187,8 +236,9 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
         // all data sent
-        if ( finished_sending(con_data) )
-            close_connection(con_data);
+        if ( finished_sending(con_data) && con_data->close_connection )
+            terminate_connection(con_data);
+        // event_active(con_data->event->event_close_con, 0, 0);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
@@ -207,6 +257,7 @@ bool finished_sending(struct client_data *con_data) {
 
     free(con_data->send_buf->buffer);
     free(con_data->send_buf);
+    con_data->send_buf = NULL;
 
     /* if there is another buffer to be queued */
     if ( next != NULL ) {

@@ -37,7 +37,7 @@ ev_ssize_t load_file_to_buf(char *restrict buf, size_t             buf_capacity,
         return -1;
     }
 
-    ret = fread(buf + last, capacity - last, sizeof(char), message_file);
+    ret = fread(buf + last, sizeof(char), capacity - last, message_file);
 
     if ( ret < capacity - last ) {
         if ( ferror(message_file) ) {

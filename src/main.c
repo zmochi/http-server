@@ -693,14 +693,15 @@ struct client_data *init_con_data(struct event_data *event) {
 
     con_data->append_response = append_response;
 
-    con_data->recv_buf         = calloc(1, sizeof(*con_data->recv_buf));
+    con_data->recv_buf = calloc(1, sizeof(*con_data->recv_buf));
+    catchExcp(con_data->recv_buf == NULL,
+              "calloc: couldn't allocate recv buffer", 1);
+
     con_data->recv_buf->buffer = calloc(request_buffer_capacity, sizeof(char));
     con_data->recv_buf->capacity = request_buffer_capacity;
     con_data->request            = calloc(1, sizeof(*con_data->request));
     con_data->event              = event;
 
-    catchExcp(con_data->recv_buf == NULL,
-              "calloc: couldn't allocate recv buffer", 1);
     catchExcp(con_data->recv_buf->buffer == NULL,
               "calloc: couldn't allocate recv buffer", 1);
     catchExcp(con_data->request == NULL,

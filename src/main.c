@@ -4,16 +4,12 @@
 #include "status_codes.h"
 
 /* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG(fmt, ...)     printf("LOG:" fmt "\n", ##__VA_ARGS__)
+#define LOG(fmt, ...)     printf("LOG: " fmt "\n", ##__VA_ARGS__)
 #define LOG_ERR(fmt, ...) fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
 
 static config server_conf;
 
 int CLIENT_TIMEOUT_SEC;
-
-const char *HTTP_RESPONSE_BASE_FMT = "HTTP/1.%d %d %s\r\n"
-                                     "Server: %s\r\n"
-                                     "Date: %s\r\n";
 
 void accept_cb(evutil_socket_t, short, void *);
 void send_cb(evutil_socket_t sockfd, short flags, void *arg);
@@ -89,8 +85,7 @@ int init_server(config conf) {
 }
 
 void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
-    struct event   *event_read, *event_write;
-    struct event   *event_close_con;
+    struct event   *event_read, *event_write, *event_close_con;
     evutil_socket_t incoming_sockfd;
     int             status;
 
@@ -198,7 +193,7 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
     } else {
-        fprintf(stderr, "Unknown error while sending data\n");
+        LOG_ERR("send_cb: unknown error while sending data");
         exit(1);
     }
 }
@@ -223,6 +218,8 @@ bool finished_sending(struct client_data *con_data) {
 }
 
 int http_handle_incomplete_req(struct client_data *con_data) {
+    /* TODO circular recv: shouldn't resize buffer every time in circular buffer
+     */
     int status;
     /* if request is incomplete because we reached buffer capacity,
     realloc: */
@@ -270,6 +267,8 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
             case HTTP_INCOMPLETE_REQ:
                 http_handle_incomplete_req(con_data);
                 return;
+            case EXIT_SUCCESS:
+                break;
             default:
                 LOG_ERR(
                     "recv_cb: unexpected return value from http_parse_request. "
@@ -296,6 +295,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
         if ( !(host_header_flags & HEADER_EXISTS) ) {
             http_handle_bad_request(con_data);
+            terminate_connection(con_data);
             return;
         }
     }
@@ -310,11 +310,15 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
             return; /* wait for more data to become available */
 
         case HTTP_ENTITY_TOO_LARGE:
+            /* http_respond_fallback sends Connection: close */
             http_respond_fallback(con_data, Request_Entity_Too_Large);
+            terminate_connection(con_data);
             return;
 
         case HTTP_BAD_REQ:
-            http_handle_bad_request(con_data);
+            /* http_respond_fallback sends Connection: close */
+            http_respond_fallback(con_data, Bad_Request);
+            terminate_connection(con_data);
             return;
 
         default:
@@ -339,63 +343,32 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         terminate_connection(con_data);
         return;
     }
+
+    /* finished processing a single request. */
 }
 
 int terminate_connection(struct client_data *con_data) {
 
-    finished_receiving(con_data);
-
-    int header_flags = http_extract_validate_header(
-        "Connection", strlen("Connection"), "close", strlen("close"));
-    if ( header_flags & HEADER_VALUE_VALID ) {
-        con_data->close_connection = true;
-        close_connection(con_data);
-    }
-
-    return 0;
-}
-
-int close_connection(struct client_data *con_data) {
-    // if ( con_data->recv_buf->buffer == NULL ) {
-    //     fprintf(stderr, "close_connection: recv_buffer is NULL when "
-    //                     "closing connection!\n");
-    // } else {
-    //     free(con_data->recv_buf->buffer);
-    // }
-    //
-    // if ( con_data->send_buf->buffer == NULL ) {
-    //     fprintf(stderr, "close_connection: send_buffer is NULL when "
-    //                     "closing connection!\n");
-    // } else {
-    //     free(con_data->send_buf->buffer);
+    // int header_flags = http_extract_validate_header(
+    //     "Connection", strlen("Connection"), "close", strlen("close"));
+    // if ( header_flags & HEADER_VALUE_VALID ) {
+    //     con_data->close_connection = true;
+    //     close_connection(con_data);
     // }
 
-    if ( con_data->request == NULL ) {
-        fprintf(stderr,
-                "close_connection: request is NULL when closing connection!\n");
-    } else {
-        free(con_data->request);
-    }
+    con_data->close_connection = true;
 
-    event_free(con_data->event->event_read);
-    // event_free(con_data->event->event_write);
-    // evutil_closesocket(con_data->event->sockfd);
+    event_active(con_data->event->event_close_con, 0, 0);
 
-    if ( con_data == NULL ) {
-        fprintf(stderr, "close_connection: con_data is NULL when closing "
-                        "connection!\n");
-    } else {
-        free(con_data);
-    }
     return 0;
 }
 
 int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
-    ev_ssize_t nbytes = 0;
+    ev_ssize_t          nbytes   = 0;
+    struct recv_buffer *recv_buf = con_data->recv_buf;
 
-    nbytes = recv(
-        sockfd, con_data->recv_buf->buffer + con_data->recv_buf->bytes_received,
-        con_data->recv_buf->capacity - con_data->recv_buf->bytes_received, 0);
+    nbytes = recv(sockfd, recv_buf->buffer + recv_buf->bytes_received,
+                  recv_buf->capacity - recv_buf->bytes_received, 0);
 
     if ( nbytes == SOCKET_ERROR ) {
         switch ( EVUTIL_SOCKET_ERROR() ) {
@@ -414,7 +387,7 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
         }
     }
 
-    con_data->recv_buf->bytes_received += nbytes;
+    recv_buf->bytes_received += nbytes;
     return 0;
 }
 
@@ -449,6 +422,10 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     buflen = new_send_buf->capacity;
 
+    const char *HTTP_RESPONSE_BASE_FMT = "HTTP/1.%d %d %s\r\n"
+                                         "Server: %s\r\n"
+                                         "Date: %s\r\n";
+
     ret =
         snprintf(new_send_buf->buffer, buflen, HTTP_RESPONSE_BASE_FMT,
                  con_data->request->minor_ver, status_code,
@@ -477,8 +454,10 @@ int http_respond(struct client_data *con_data, http_res *response) {
         string_len = strlen(header->header_name) +
                      strlen(header->header_value) + strlen(": \r\n");
 
-        if ( ret >= string_len ) { // out of memory
+        if ( ret > string_len ) { // out of memory
             // TODO: realloc send buffer
+            LOG_ERR("http_respond: snprintf: headers out of memory");
+            exit(1);
         } else if ( ret < 0 ) {
             LOG_ERR("http_respond: snprintf: headers");
             exit(1);
@@ -699,13 +678,20 @@ int reset_con_data(struct client_data *con_data) {
 }
 
 int finished_receiving(struct client_data *con_data) {
-    catchExcp(con_data->send_buf == NULL || con_data->send_buf->buffer == NULL,
+    struct recv_buffer *recv_buf = con_data->recv_buf;
+
+    catchExcp(recv_buf == NULL || recv_buf->buffer == NULL,
               "finished_receiving: critical error, no recv_buf found\n", 1);
 
-    struct recv_buffer *recv_buf = con_data->recv_buf;
     free(recv_buf->buffer);
     free(recv_buf);
     return 0;
+}
+
+int request_processed(struct client_data *con_data) {
+    struct recv_buffer *recv_buf = con_data->recv_buf;
+
+    return EXIT_SUCCESS;
 }
 
 // TODO: add documentation for transfer_encoding part
@@ -713,10 +699,10 @@ int finished_receiving(struct client_data *con_data) {
 /**
  * @brief Manages content in the request part of the specified `con_data`
  * Marks the content as parsed in `con_data` if the user specified
- * Content-Length matches the number of bytes received (Assuming the headers
- * were parsed and put into the hashmap before calling this function), and
- * reallocates `recv_buffer` from `con_data` Content_Length > recv buffer
- * capacity. Sets `bytes_parsed` in `con_data`.
+ * Content-Length is <= the number of bytes received (Assuming the headers
+ * were parsed and put into the hashmap before calling this function). Sets
+ * `bytes_parsed`  `con_data` to number of bytes in request if all expected data
+ * arrived.
  *
  * @param con_data Connection data to manage
  * @param content_length Pointer to content_length, to be set by the method
@@ -744,7 +730,7 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
         /* populate content_length variable with value from user */
         content_length_header_flags = http_extract_content_length(
             content_length,
-            MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_parsed);
+            MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_received);
     }
 
     if ( !(content_length_header_flags & HEADER_EXISTS) ) {
@@ -770,9 +756,8 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
      * amount of bytes parsed + Content-Length does not exceed the amount of
      * bytes received (checked above)
      *
-     * this might pose a problem if the
-     * recv_buffer wasn't cleared somehow for this connection, but this
-     * shouldn't happen.
+     * this might pose a problem if the recv_buffer wasn't cleared somehow for
+     * this connection, but this shouldn't happen.
      */
     con_data->recv_buf->bytes_parsed += *content_length;
     con_data->recv_buf->content_parsed = true;
@@ -829,6 +814,9 @@ int http_parse_request(struct client_data *con_data) {
         &request->path, &request->path_len, &request->minor_ver,
         request->headers, &request->num_headers, *bytes_parsed);
 
+    /* TODO circular recv: continue parsing request from buffer start if buffer
+    end was reached */
+
     // switch ( *bytes_parsed ) {
     //     case HTTP_BAD_REQ:             // TODO: Bad request?
     //         return 1;                  // return 1 if request has invalid
@@ -842,5 +830,5 @@ int http_parse_request(struct client_data *con_data) {
     //         break;
     // }
 
-    return 0; // success
+    return EXIT_SUCCESS; // success
 }

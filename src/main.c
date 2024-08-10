@@ -597,23 +597,19 @@ void http_free_response_headers(http_res *response) {
  */
 void http_respond_fallback(struct client_data *con_data,
                            http_status_code    status_code) {
+    http_res     response;
     size_t       send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
     const size_t MAX_FILE_READ_SIZE   = 1 << 27;
-    int          status;
-    size_t       msg_bytes_written;
-    size_t       last_len;
     char         message_filepath[256];
+    int          status;
+    ev_ssize_t   msg_bytes_written;
+    /* for load_file_to_buf call: */
+    ev_ssize_t ret;
+    size_t     total_read = 0;
 
     /* to be free'd in send_cb, after sending its contents */
     char *buffer = malloc(send_buffer_capacity);
     catchExcp(buffer == NULL, "malloc: couldn't allocate send buffer", 1);
-
-    /* first_header to be freed at the end of this function */
-    http_res response = {.status_code  = status_code,
-                         .message      = buffer,
-                         .first_header = malloc(sizeof(struct http_header))};
-
-    http_header_init(response.first_header, "Connection", "Close", NULL);
 
     /* create path string of HTTP response with provided status code */
     msg_bytes_written =
@@ -621,14 +617,14 @@ void http_respond_fallback(struct client_data *con_data,
                  server_conf.ROOT_PATH, status_code);
     LOG("sending error from filename: %s/%d.html", server_conf.ROOT_PATH,
         status_code);
-    catchExcp(msg_bytes_written >= strlen(message_filepath),
-              "http_respond_fallback:\n\tsnprintf: couldn't write html "
+    LOG("message_filepath: %s", message_filepath);
+    catchExcp(msg_bytes_written > strlen(message_filepath),
+              "http_respond_fallback: snprintf: couldn't write html "
               "filename to buffer\n",
               1);
 
-    while ( (msg_bytes_written =
-                 load_file_to_buf(buffer, send_buffer_capacity,
-                                  message_filepath, &last_len)) > 0 ) {
+    while ( (ret = load_file_to_buf(buffer, send_buffer_capacity,
+                                    message_filepath, &total_read)) > 0 ) {
         /* resize buffer as needed, if file hasn't been fully read */
         status =
             handler_buf_realloc(&buffer, &send_buffer_capacity,
@@ -644,13 +640,24 @@ void http_respond_fallback(struct client_data *con_data,
         }
     }
 
-    if ( msg_bytes_written < 0 ) {
+    if ( ret < 0 ) {
         LOG_ERR("http_respond_fallback: error in load_file_to_buf");
         exit(1);
     }
 
+    msg_bytes_written = total_read;
+
 exit_while:
 
+    /* first_header to be freed at the end of this function */
+    response.status_code  = status_code;
+    response.message      = buffer;
+    response.first_header = malloc(sizeof(struct http_header));
+
+    catchExcp(response.first_header == NULL, "http_respond_fallback: malloc",
+              1);
+
+    http_header_init(response.first_header, "Connection", "Close", NULL);
     http_respond(con_data, &response);
     http_free_response_headers(&response);
 }

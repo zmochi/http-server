@@ -13,7 +13,8 @@ int strftime_gmtformat(char *buf, size_t buflen) {
  * @brief reads file at @filepath to @buf with capacity @buf_capacity, adds null
  * byte at end of read caller should repeatedly call this function until 0 is
  * returned to indicate end of file. at each call, caller should provide
- * last_len which is the number of bytes read by this function so far
+ * last_len which is the number of bytes read by this function so far, and after
+ * EOF its the total number of bytes read
  *
  * @param buf buffer to load file contents into
  * @param buf_capacity buffer capacity
@@ -24,16 +25,14 @@ int strftime_gmtformat(char *buf, size_t buflen) {
  * occurred
  */
 ev_ssize_t load_file_to_buf(char *restrict buf, size_t             buf_capacity,
-                            const char *restrict filepath, size_t *last_len) {
+                            const char *restrict filepath, size_t *total_read) {
     /* would prefer to mmap() file into memory but not cross-compatible that
      * way... */
-    FILE *message_file = fopen(filepath, "r");
-    /* -1 on @capacity to make space for null byte at end */
-    size_t ret, message_file_size, capacity = buf_capacity - 1,
-                                   last = *last_len;
+    FILE  *message_file = fopen(filepath, "r");
+    size_t ret, capacity = buf_capacity, last = *total_read;
 
     if ( !message_file ) {
-        fprintf(stderr, "load_file_to_buf: couldn't open file at path %s",
+        fprintf(stderr, "load_file_to_buf: couldn't open file at path %s\n",
                 filepath);
         return -1;
     }
@@ -45,14 +44,16 @@ ev_ssize_t load_file_to_buf(char *restrict buf, size_t             buf_capacity,
             perror("load_file_to_buf: fread: ");
             return -1;
         } else if ( feof(message_file) ) {
-            /* reached EOF, add null byte */
-            buf[last + ret + 1] = '\0';
+            /* reached EOF */
+            fclose(message_file);
+            *total_read += ret;
             return 0;
         }
     }
 
-    /* haven't reached EOF */
-    *last_len += ret;
+    /* haven't reached EOF, caller must increase buffer capacity */
+    fclose(message_file);
+    *total_read += ret;
     return ret;
 }
 

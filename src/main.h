@@ -12,9 +12,7 @@
 
 #include "libs/picohttpparser/picohttpparser.h"
 
-#include <assert.h>
 #include <event2/event.h>
-#include <event2/listener.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -31,10 +29,9 @@
 #define SOCKET_ERROR              -1
 #define BACKLOG                   64
 #define INIT_BUFFER_SIZE          256
-#define INIT_SEND_BUFFER_CAPACITY 256
+#define INIT_SEND_BUFFER_CAPACITY (1 << 10) // 1KB
 #define MAX_NUM_HEADERS           100
-#define MAX_RECV_BUFFER_SIZE      1073741824 // 1GB
-#define HEADER_HOST_EXPECTED      "host"
+#define MAX_RECV_BUFFER_SIZE      (1 << 30) // 1GB
 #define HTTP_BAD_REQ              -1
 #define HTTP_INCOMPLETE_REQ       -2
 #define HTTP_ENTITY_TOO_LARGE     -3
@@ -49,6 +46,7 @@ struct event_data { // TODO: change name to client_ev_data
     evutil_socket_t    sockfd;
     void              *event_read;
     void              *event_write;
+    void              *event_close_con;
 };
 
 typedef struct {
@@ -76,6 +74,7 @@ struct recv_buffer {
 struct client_data {
     struct event_data  *event;
     struct send_buffer *send_buf;
+    /* TODO: doubly linked list instead of singly with last ptr */
     struct send_buffer *last;
     struct recv_buffer *recv_buf;
     http_req           *request;

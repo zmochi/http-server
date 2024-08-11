@@ -2,5 +2,5 @@
 	path = libs/llhttp
 	url = git@github.com:nodejs/llhttp.git
 [submodule "src/libs/picohttpparser"]
-	path = src/libs/picohttpparser
+	path = libs/picohttpparser
 	url = git@github.com:h2o/picohttpparser.git

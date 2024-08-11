@@ -493,7 +493,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     bytes_written += ret;
 
-    static const char *HEADER_FMT = "%s: %s\r\n";
+    static const char *HEADER_FMT      = "%s: %s\r\n";
+    static const char *HEADER_SKELETON = ": \r\n";
 
     // copy headers to send buffer:
     for ( struct http_header *header = response->first_header; header != NULL;
@@ -502,9 +503,11 @@ int http_respond(struct client_data *con_data, http_res *response) {
                        new_send_buf->capacity - bytes_written, HEADER_FMT,
                        header->header_name, header->header_value);
 
-        /* the last strlen() is the characters always present in a header */
+        /* the last strlen() is the characters always present in a header
+         * this weird length check is because we must get some expected length
+         * to compare against output of snprintf */
         string_len = strlen(header->header_name) +
-                     strlen(header->header_value) + strlen(": \r\n");
+                     strlen(header->header_value) + strlen(HEADER_SKELETON);
 
         if ( ret > string_len ) { // out of memory
             // TODO: realloc send buffer

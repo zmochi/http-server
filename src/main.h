@@ -10,7 +10,7 @@
 
 #endif
 
-#include "libs/picohttpparser/picohttpparser.h"
+#include "../libs/picohttpparser/picohttpparser.h"
 
 #include <event2/event.h>
 #include <inttypes.h>

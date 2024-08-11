@@ -899,18 +899,12 @@ int http_parse_request(struct client_data *con_data) {
     /* TODO circular recv: continue parsing request from buffer start if buffer
     end was reached */
 
-    // switch ( *bytes_parsed ) {
-    //     case HTTP_BAD_REQ:             // TODO: Bad request?
-    //         return 1;                  // return 1 if request has invalid
-    //         format break;
-    //     case HTTP_INCOMPLETE_REQ:      // Incomplete request
-    //         return 2;                  // return 2 if request is
-    //         incomplete
-    //     default:
-    //         assert(*bytes_parsed > 0); // TODO: is this good practice? we
-    //         // always expect bytes_read >= -2
-    //         break;
-    // }
-
-    return EXIT_SUCCESS; // success
+    switch ( *bytes_parsed ) {
+        case HTTP_BAD_REQ:              // Bad request?
+            return HTTP_BAD_REQ;        // return -1 if request has invalid
+        case HTTP_INCOMPLETE_REQ:       // Incomplete request
+            return HTTP_INCOMPLETE_REQ; // return -2 if request is
+        default:
+            return EXIT_SUCCESS;
+    }
 }

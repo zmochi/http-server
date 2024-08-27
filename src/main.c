@@ -2,6 +2,8 @@
 #include "headers.h"
 #include "http_utils.h"
 #include "status_codes.h"
+
+/* for log10() function used in http_respond_fallback */
 #include <math.h>
 
 /* ##__VA_ARGS__ requires compiling with gcc or clang */
@@ -33,7 +35,8 @@ int  reset_con_data(struct client_data *con_data);
 int  terminate_connection(struct client_data *con_data);
 struct client_data *init_con_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
-int                 http_parse_request(struct client_data *con_data);
+
+int  http_parse_request(struct client_data *con_data);
 int  http_parse_content(struct client_data *con_data, size_t *content_length);
 int  http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
                                  size_t buffer_len, http_req *http_request,
@@ -62,10 +65,10 @@ int init_server(config conf) {
     struct event_data event_accept_args = {.base = base};
 
     /* event_accept is triggered when there's a new connection and calls
-    accept_cb
+     * accept_cb
      *
-     * EV_PERSIST allows reading unlimited data from user, or until the
-    callback function runs event_del */
+     * EV_PERSIST keeps the event active (listening for new connections) instead
+     * of sending it to sleep after a single wake-up */
     event_accept =
         event_new(base, main_sockfd, EV_READ | /* EV_WRITE |  */ EV_PERSIST,
                   accept_cb, &event_accept_args);
@@ -303,24 +306,31 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
 
-    /* receive the waiting data just once. if there's more data to read, recv_cb
-     * will be called again */
+    /* this function calls recv() once, populates con_data->recv_buf, and
+     * returns appropriate error codes. If there's still data to read after
+     * recv() is called, the event loop will call recv_cb again */
+    // TODO: handle errors from recv_data
     recv_data(sockfd, con_data);
 
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
-        /* parse headers from request */
+        /* parses everything preceding the content from request, populates
+         * con_data->request->headers with pointers to the HTTP headers and
+         * their values in the original request */
         status = http_parse_request(con_data);
 
         switch ( status ) {
             case HTTP_BAD_REQ:
                 http_handle_bad_request(con_data);
                 return;
+
             case HTTP_INCOMPLETE_REQ:
                 http_handle_incomplete_req(con_data);
                 return;
+
             case EXIT_SUCCESS:
                 break;
+
             default:
                 LOG_ERR(
                     "recv_cb: unexpected return value from http_parse_request. "
@@ -428,12 +438,12 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
                 // TODO: handle connection reset by client
                 return -1;    // -1 for unknown error? until the TODO is done
 
-            case EWOULDBLOCK: // Shouldn't happen at all
-                fprintf(stderr, "EWOULDBLOCK!\n");
-                break;
+            case EWOULDBLOCK: // Shouldn't happen at all, socket should always
+                              // be non-blocking
+                LOG_ERR("EWOULDBLOCK!");
 
             default:
-                fprintf(stderr, "recv: %s\n",
+                LOG_ERR("recv: %s",
                         evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
                 exit(1);
         }
@@ -888,9 +898,8 @@ int http_parse_request(struct client_data *con_data) {
     http_req   *request       = con_data->request;
     ev_ssize_t *byte_received = &con_data->recv_buf->bytes_received;
     ev_ssize_t *bytes_parsed  = &con_data->recv_buf->bytes_parsed;
-    // http_parse_request (Or actually phr_parse_request that is called from
-    // it) returns the *total* length of the HTTP request line + headers for
-    // each call, so for each iteration we use = instead of +=
+    /* phr_parse_request returns the *total* length of the HTTP request line +
+     * headers for each call, so for each iteration use = instead of += */
     *bytes_parsed = phr_parse_request(
         buffer, buffer_len, &request->method, &request->method_len,
         &request->path, &request->path_len, &request->minor_ver,
@@ -900,10 +909,12 @@ int http_parse_request(struct client_data *con_data) {
     end was reached */
 
     switch ( *bytes_parsed ) {
-        case HTTP_BAD_REQ:              // Bad request?
-            return HTTP_BAD_REQ;        // return -1 if request has invalid
-        case HTTP_INCOMPLETE_REQ:       // Incomplete request
-            return HTTP_INCOMPLETE_REQ; // return -2 if request is
+        case HTTP_BAD_REQ: // bad request
+            return HTTP_BAD_REQ;
+
+        case HTTP_INCOMPLETE_REQ: // incomplete request
+            return HTTP_INCOMPLETE_REQ;
+
         default:
             return EXIT_SUCCESS;
     }

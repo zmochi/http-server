@@ -179,8 +179,7 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
         return;
     }
     /* free recv buffer if not free'd already */
-    if ( recv_buf != NULL )
-        finished_receiving(con_data);
+    if ( recv_buf != NULL ) finished_receiving(con_data);
     /* free send buffers (and discard data to be sent) if connection timed out
      */
     if ( send_buf != NULL )
@@ -386,6 +385,9 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
             http_respond_fallback(con_data, Bad_Request);
             terminate_connection(con_data);
             return;
+
+        case EXIT_SUCCESS:
+            break;
 
         default:
             LOG_ERR("recv_cb: unexpected return value from http_parse_content. "
@@ -845,9 +847,10 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
      */
 
     /* check if we already got the content length */
-    if ( *content_length != 0 ) {
+    if ( *content_length > 0 ) {
         content_length_header_flags = HEADER_EXISTS | HEADER_VALUE_VALID;
-    } else {
+    } else { /* content_length is of type size_t, so if this is reached
+                content_length == 0 */
         /* populate content_length variable with value from user */
         content_length_header_flags = http_extract_content_length(
             content_length,

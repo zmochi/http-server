@@ -1,4 +1,5 @@
 #include "main.h"
+#include "../libs/boost/CURRENT_FUNCTION.HPP"
 #include "headers.h"
 #include "http_utils.h"
 #include "status_codes.h"
@@ -12,6 +13,12 @@
 
 static config server_conf;
 
+#define HANDLE_ALLOC_FAIL()                                                    \
+    {                                                                          \
+        LOG_ERR("Allocation failed in function %s at line %d",                 \
+                BOOST_CURRENT_FUNCTION, __LINE__);                             \
+        exit(1);                                                               \
+    }
 int CLIENT_TIMEOUT_SEC;
 
 void accept_cb(evutil_socket_t, short, void *);
@@ -465,12 +472,16 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
 int http_respond(struct client_data *con_data, http_res *response) {
     /* the struct send_buffer and associated buffer will be free'd in send_cb */
     struct send_buffer *new_send_buf = calloc(1, sizeof(*new_send_buf));
-    catchExcp(new_send_buf == NULL, "http_respond: calloc", 1);
-    new_send_buf->buffer   = malloc(INIT_SEND_BUFFER_CAPACITY);
-    new_send_buf->capacity = INIT_SEND_BUFFER_CAPACITY;
+    if ( !new_send_buf ) HANDLE_ALLOC_FAIL();
+    new_send_buf->buffer = malloc(INIT_SEND_BUFFER_CAPACITY);
+    if ( !new_send_buf->buffer ) {
+        free(new_send_buf);
+        HANDLE_ALLOC_FAIL();
+    }
+
     /* INIT_SEND_BUFFER_CAPACITY must be big enough for HTTP_RESPONSE_BASE_FMT
      * after its been formatted */
-    catchExcp(new_send_buf->buffer == NULL, "http_respond: malloc", 1);
+    new_send_buf->capacity = INIT_SEND_BUFFER_CAPACITY;
 
     char       date[128]; // temporary buffer to pass date string
     int        status_code = response->status_code;
@@ -623,7 +634,7 @@ void http_respond_fallback(struct client_data *con_data,
 
     /* to be free'd in send_cb, after sending its contents */
     char *buffer = malloc(send_buffer_capacity);
-    catchExcp(buffer == NULL, "malloc: couldn't allocate send buffer", 1);
+    if ( !buffer ) HANDLE_ALLOC_FAIL();
 
     /* create path string of HTTP response with provided status code */
     msg_bytes_written =
@@ -668,6 +679,7 @@ exit_while:
     response.message                       = buffer;
     response.first_header                  = malloc(sizeof(struct http_header));
     struct http_header *content_len_header = malloc(sizeof(struct http_header));
+    if ( !response.first_header || !content_len_header ) HANDLE_ALLOC_FAIL();
     /* make space for string (content_length_str) that stores the Content-Length
      * header, in this case the size of the file read. log10(num) + 1 is the
      * number of digits in a base 10 number
@@ -680,9 +692,6 @@ exit_while:
         /* not a very critical error, no need to terminate server */
         LOG_ERR("http_respond_fallback: snprintf: error in writing "
                 "Content-Length header");
-
-    catchExcp(response.first_header == NULL || content_len_header == NULL,
-              "http_respond_fallback: malloc", 1);
 
     http_header_init(response.first_header, "Connection", "Close",
                      content_len_header);

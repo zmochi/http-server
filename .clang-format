@@ -9,6 +9,9 @@ SpacesInParens: Custom
 SpacesInParensOptions:
  InConditionalStatements: true # if(cond) -> if( cond )
 
+# self explanatory
+AllowShortIfStatementsOnASingleLine: true
+
 # aligns assignments along =
 AlignConsecutiveAssignments:
   Enabled: true

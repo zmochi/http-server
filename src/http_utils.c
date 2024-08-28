@@ -2,8 +2,8 @@
 #include "headers.h"
 
 /**
- * @brief gets current GMT time in the format (example) "01 Jan 1970 00:00:00
- * GMT"
+ * @brief gets current GMT time in the format (example) "Sun, 01 Jan 1970
+ * 00:00:00 GMT"
  *
  * @param buf buf to fill time in
  * @param bufcap capacity of @buf
@@ -13,7 +13,7 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
 
     time_t     time_now         = time(NULL);
     struct tm *tm_info          = gmtime(&time_now);
-    int        EXPECTED_FMT_LEN = 24;
+    int        EXPECTED_FMT_LEN = 29;
 
     /* strftime returns number of characters written to buf on success. The
      * format passed should always yield EXPECTED_FMT_LEN characters */

@@ -1,15 +1,10 @@
 #include "main.h"
-#include "../libs/boost/CURRENT_FUNCTION.HPP"
 #include "headers.h"
 #include "http_utils.h"
 #include "status_codes.h"
 
 /* for log10() function used in http_respond_fallback */
 #include <math.h>
-
-/* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG(fmt, ...)     printf("LOG: " fmt "\n", ##__VA_ARGS__)
-#define LOG_ERR(fmt, ...) fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
 
 static config server_conf;
 

@@ -10,6 +10,7 @@
 
 #endif
 
+#include "../libs/boost/CURRENT_FUNCTION.hpp"
 #include "../libs/picohttpparser/picohttpparser.h"
 
 #include <event2/event.h>
@@ -23,6 +24,13 @@
 #ifndef __MAIN_H
 #define __MAIN_H
 
+/* ##__VA_ARGS__ requires compiling with gcc or clang */
+#define LOG(fmt, ...)                                                          \
+    printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
+#define LOG_ERR(fmt, ...)                                                      \
+    fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
+            ##__VA_ARGS__)
+
 // all sizes are in bytes
 /* avoid 0 and 1 values since they're used to indicate general success/failure
  */
@@ -30,16 +38,22 @@
 #define BACKLOG                   64
 #define INIT_BUFFER_SIZE          256
 #define INIT_SEND_BUFFER_CAPACITY (1 << 10) // 1KB
-#define MAX_NUM_HEADERS           100
 #define MAX_RECV_BUFFER_SIZE      (1 << 30) // 1GB
-#define HTTP_BAD_REQ              -1
-#define HTTP_INCOMPLETE_REQ       -2
-#define HTTP_ENTITY_TOO_LARGE     -3
-#define HEADER_VALUE_VALID        2
-#define HEADER_EXISTS             4
-#define HEADER_VALUE_EXCEEDS_MAX  8
 #define SEND_REALLOC_MULTIPLIER   2
 #define MAX_SEND_BUFFER_SIZE      MAX_RECV_BUFFER_SIZE
+
+enum http_req_props {
+    HTTP_BAD_REQ          = -1,
+    HTTP_INCOMPLETE_REQ   = -2,
+    HTTP_ENTITY_TOO_LARGE = -3,
+};
+
+enum http_header_props {
+    MAX_NUM_HEADERS          = 100,
+    HEADER_VALUE_VALID       = 2,
+    HEADER_EXISTS            = 4,
+    HEADER_VALUE_EXCEEDS_MAX = 8,
+};
 
 struct event_data { // TODO: change name to client_ev_data
     struct event_base *base;

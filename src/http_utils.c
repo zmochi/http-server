@@ -125,17 +125,17 @@ int http_extract_content_length(size_t *content_length_storage,
     short              header_flags = 0;
     struct phr_header *header_content_len =
         http_get_header("Content-Length", strlen("Content-Length"))->req_header;
-    // TODO: maybe strlen above returns incorrect length because of null byte?
-    size_t content_len_str_size = header_content_len->value_len;
-    char   content_len_str[content_len_str_size + 1];
 
     if ( header_content_len == NULL ) {
         return header_flags;
     }
 
+    // TODO: maybe strlen above returns incorrect length because of null byte?
+    size_t content_len_str_size = header_content_len->value_len;
+    char   content_len_str[content_len_str_size + 1];
+
     header_flags |= HEADER_EXISTS;
 
-    // TODO: define is_integer
     if ( !is_integer(header_content_len->value, content_len_str_size) ) {
         return header_flags;
     }

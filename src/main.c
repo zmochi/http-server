@@ -14,7 +14,10 @@ static config server_conf;
                 BOOST_CURRENT_FUNCTION, __LINE__);                             \
         exit(1);                                                               \
     }
+
 int CLIENT_TIMEOUT_SEC;
+
+#define INIT_CLIENT_TIMEOUT {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
 
 void accept_cb(evutil_socket_t, short, void *);
 void send_cb(evutil_socket_t sockfd, short flags, void *arg);
@@ -35,7 +38,7 @@ void http_respond_fallback(struct client_data *con_data,
 int  populate_headers_map(struct client_data *con_data);
 int  reset_con_data(struct client_data *con_data);
 int  terminate_connection(struct client_data *con_data);
-struct client_data *init_con_data(struct event_data *ev_data);
+struct client_data *init_client_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
 
 int  http_parse_request(struct client_data *con_data);
@@ -115,12 +118,10 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
 
     evutil_make_socket_nonblocking(incoming_sockfd);
 
-    /* Initializing connection data, init_con_data allocates neccesary
+    /* Initializing connection data, init_client_data allocates neccesary
      * memory */
     struct client_data *con_data =
-        init_con_data((struct event_data *)event_data);
-    struct timeval client_timeout = {.tv_sec  = CLIENT_TIMEOUT_SEC,
-                                     .tv_usec = 0};
+        init_client_data((struct event_data *)event_data);
 
     event_read = event_new(con_data->event->base, incoming_sockfd,
                            EV_READ | EV_PERSIST, recv_cb, con_data);
@@ -143,7 +144,8 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
     status = event_add(event_write, NULL);
     catchExcp(status == -1, "event_add: couldn't add write event", 1);
 
-    status = event_add(event_close_con, &client_timeout);
+    struct timeval client_timeout = INIT_CLIENT_TIMEOUT;
+    status                        = event_add(event_close_con, &client_timeout);
     catchExcp(status == -1, "event_add: couldn't add close-connection event",
               1);
 
@@ -718,33 +720,56 @@ int append_response(struct client_data *con_data,
     return 0;
 }
 
-struct client_data *init_con_data(struct event_data *event) {
-    int send_buffer_capacity    = INIT_SEND_BUFFER_CAPACITY;
+/**
+ * @brief initalizes the @request struct in struct client_data
+ * @return EXIT_FAILURE on failure to allocate memory
+ */
+static inline int init_client_request(struct client_data *con_data) {
+    con_data->request = calloc(1, sizeof(*con_data->request));
+    if ( !con_data->request ) return EXIT_FAILURE;
+
+    /* the following should match the size of array in con_data->request, which
+     * is set in definition of http_req */
+    con_data->request->num_headers = MAX_NUM_HEADERS;
+
+    return EXIT_SUCCESS;
+}
+
+/**
+ * @brief initalizes the @recv_buf struct in struct client_data
+ * @return EXIT_FAILURE on failure to allocate memory
+ */
+static inline int init_client_recv_buf(struct client_data *con_data) {
     int request_buffer_capacity = INIT_BUFFER_SIZE;
 
-    struct client_data *con_data = calloc(1, sizeof(struct client_data));
-    catchExcp(con_data == NULL,
-              "calloc: couldn't allocate client_data when initializing "
-              "connection",
-              1);
-
-    con_data->append_response = append_response;
-
     con_data->recv_buf = calloc(1, sizeof(*con_data->recv_buf));
-    catchExcp(con_data->recv_buf == NULL,
-              "calloc: couldn't allocate recv buffer", 1);
+    if ( !con_data->recv_buf ) return EXIT_FAILURE;
 
     con_data->recv_buf->buffer = calloc(request_buffer_capacity, sizeof(char));
-    con_data->recv_buf->capacity = request_buffer_capacity;
-    con_data->request            = calloc(1, sizeof(*con_data->request));
-    con_data->event              = event;
 
-    catchExcp(con_data->recv_buf->buffer == NULL,
-              "calloc: couldn't allocate recv buffer", 1);
-    catchExcp(con_data->request == NULL,
-              "calloc: couldn't allocate http request when initializing "
-              "connection",
-              1);
+    if ( !con_data->recv_buf->buffer ) {
+        /* free successfully allocated data from this function */
+        free(con_data->recv_buf);
+        return EXIT_FAILURE;
+    }
+
+    con_data->recv_buf->capacity = request_buffer_capacity;
+
+    return EXIT_SUCCESS;
+}
+
+struct client_data *init_client_data(struct event_data *event) {
+    int send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
+
+    struct client_data *con_data = calloc(1, sizeof(struct client_data));
+    if ( !con_data ) HANDLE_ALLOC_FAIL();
+
+    if ( init_client_recv_buf(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
+
+    if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
+
+    con_data->event           = event;
+    con_data->append_response = append_response;
 
     return con_data;
 }

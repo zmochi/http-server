@@ -17,7 +17,8 @@ static config server_conf;
 
 int CLIENT_TIMEOUT_SEC;
 
-#define INIT_CLIENT_TIMEOUT {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
+#define DFLT_CLIENT_TIMEOUT_SEC 3
+#define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
 
 void accept_cb(evutil_socket_t, short, void *);
 void send_cb(evutil_socket_t sockfd, short flags, void *arg);
@@ -57,8 +58,12 @@ int init_server(config conf) {
     struct event      *event_accept;
     struct event      *event_write;
 
-    server_conf        = conf;
-    CLIENT_TIMEOUT_SEC = conf.timeout;
+    server_conf = conf;
+
+    if ( conf.timeout != 0 )
+        CLIENT_TIMEOUT_SEC = conf.timeout;
+    else
+        CLIENT_TIMEOUT_SEC = DFLT_CLIENT_TIMEOUT_SEC;
 
     base = event_base_new();
     catchExcp(base == NULL, "Couldn't open event base.", 1);

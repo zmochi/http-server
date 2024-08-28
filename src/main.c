@@ -479,8 +479,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
     ev_ssize_t string_len;
 
     ret = strftime_gmtformat(date, sizeof(date));
-    catchExcp(ret <= 0, "strftime_gmtformat: couldn't write date into buffer",
-              1);
+    catchExcp(ret != EXIT_FAILURE,
+              "strftime_gmtformat: couldn't write date into buffer", 1);
 
     buflen = new_send_buf->capacity;
 

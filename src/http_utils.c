@@ -1,12 +1,27 @@
 #include "http_utils.h"
 #include "headers.h"
 
-int strftime_gmtformat(char *buf, size_t buflen) {
+/**
+ * @brief gets current GMT time in the format (example) "01 Jan 1970 00:00:00
+ * GMT"
+ *
+ * @param buf buf to fill time in
+ * @param bufcap capacity of @buf
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure.
+ */
+int strftime_gmtformat(char *buf, size_t bufcap) {
 
-    time_t     time_now = time(NULL);
-    struct tm *tm_info  = gmtime(&time_now);
+    time_t     time_now         = time(NULL);
+    struct tm *tm_info          = gmtime(&time_now);
+    int        EXPECTED_FMT_LEN = 24;
 
-    return strftime(buf, buflen, "%a, %d %b %Y %H:%M:%S GMT", tm_info);
+    /* strftime returns number of characters written to buf on success. The
+     * format passed should always yield EXPECTED_FMT_LEN characters */
+    if ( strftime(buf, bufcap, "%a, %d %b %Y %H:%M:%S GMT", tm_info) !=
+         EXPECTED_FMT_LEN )
+        return EXIT_FAILURE;
+
+    return EXIT_SUCCESS;
 }
 
 /**
@@ -237,18 +252,22 @@ struct addrinfo *get_local_addrinfo(const char *restrict port) {
     return res;
 }
 
-int is_integer(const char str[], int str_len) {
-    // 0 = 0x30, 9 = 0x39
-    char ch;
-
+/**
+ * @brief checks if a string of length str_len contains integer characters only
+ *
+ * @param str string to check against
+ * @param str_len length of @str
+ * @return false on failure, true on success
+ */
+inline bool is_integer(const char str[], int str_len) {
     for ( int i = 0; i < str_len; i++ ) {
-        ch = str[i];
-        if ( ch < 0x30 || ch > 0x39 ) {
-            return 0;
+        char ch = str[i];
+        if ( ch < '0' || ch > '9' ) {
+            return false;
         }
     }
 
-    return 1;
+    return true;
 }
 
 /** check if a function that returned `status` threw an error (Meaning it

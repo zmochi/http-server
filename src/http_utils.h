@@ -25,6 +25,6 @@ int         http_extract_content_length(size_t *content_length_storage,
 int         handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
                                 ev_ssize_t new_size);
 const char *stringify_statuscode(http_status_code status_code);
-int         is_integer(const char str[], int str_len);
+bool        is_integer(const char str[], int str_len);
 int         strftime_gmtformat(char *buf, size_t buflen);
 void        catchExcp(int condition, const char *err_msg, int action);

@@ -159,24 +159,30 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
 }
 
 /**
- * @brief callback function for when a connection times out OR when all data is
- * sent and close_connection flag is set in client_data struct
- *
+ * @brief callback function for when a connection times out OR when connection
+ * should be closed manually (using libevent's event_active()) to trigger this
+ * manually)
  *
  * @param sockfd socket of connection
  * @param flags libevent flags
- * @param arg libevent argument
+ * @param arg ptr to struct client_data of connection
  */
 void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     LOG("close_con_cb");
-    struct client_data *con_data        = (struct client_data *)arg;
-    struct recv_buffer *recv_buf        = con_data->recv_buf;
-    struct send_buffer *send_buf        = con_data->send_buf;
-    bool                timed_out       = flags & EV_TIMEOUT;
-    bool                close_requested = con_data->close_connection;
-    bool                send_buf_empty  = con_data->send_buf == NULL;
+    struct client_data *con_data           = (struct client_data *)arg;
+    struct recv_buffer *recv_buf           = con_data->recv_buf;
+    struct send_buffer *send_buf           = con_data->send_buf;
+    bool                timed_out          = flags & EV_TIMEOUT;
+    bool                close_requested    = con_data->close_connection;
+    bool                unsent_data_exists = !(con_data->send_buf == NULL);
 
-    if ( !(close_requested || timed_out) && !send_buf_empty ) {
+    /* don't close connection if close wasn't requested or
+     * connection didn't timeout */
+    if ( !(close_requested || timed_out) ) return;
+
+    /* if unsent data exists, send it and don't close connection */
+    if ( unsent_data_exists ) {
+        event_active(con_data->event->event_write, 0, 0);
         return;
     }
     /* free recv buffer if not free'd already */

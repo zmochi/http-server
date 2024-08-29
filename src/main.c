@@ -15,6 +15,8 @@ static config server_conf;
         exit(1);                                                               \
     }
 
+/* returns size_t of statically allocated array */
+#define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
 int              CLIENT_TIMEOUT_SEC;
 extern const int SEND_REALLOC_MUL;
@@ -717,7 +719,7 @@ void http_respond_fallback(struct client_data *con_data,
     ev_ssize_t   msg_bytes_written;
     /* for load_file_to_buf call: */
     ev_ssize_t ret;
-    size_t     read_file_size = 0;
+    size_t     content_len = 0;
 
     /* to be free'd in send_cb, after sending its contents */
     char *buffer = malloc(send_buffer_capacity);
@@ -736,7 +738,7 @@ void http_respond_fallback(struct client_data *con_data,
               1);
 
     while ( (ret = load_file_to_buf(buffer, send_buffer_capacity,
-                                    message_filepath, &read_file_size)) > 0 ) {
+                                    message_filepath, &content_len)) > 0 ) {
         /* resize buffer as needed, if file hasn't been fully read */
         status =
             handler_buf_realloc(&buffer, &send_buffer_capacity,
@@ -757,38 +759,42 @@ void http_respond_fallback(struct client_data *con_data,
         exit(1);
     }
 
-    msg_bytes_written = read_file_size;
+    msg_bytes_written = content_len;
 
 exit_while:
+/* gets base 10 number of digits in a natural number */
+#define NUM_DIGITS(num) ((int)(log10((double)num) + 1))
 
-    /* first_header to be freed at the end of this function */
-    response.status_code                   = status_code;
-    response.message                       = buffer;
-    response.first_header                  = malloc(sizeof(struct http_header));
-    struct http_header *content_len_header = malloc(sizeof(struct http_header));
-    if ( !response.first_header || !content_len_header ) HANDLE_ALLOC_FAIL();
-    /* make space for string (content_length_str) that stores the Content-Length
-     * header, in this case the size of the file read. log10(num) + 1 is the
-     * number of digits in a base 10 number
-     * +1 at the end for null byte */
-    int  file_size_num_digits = ((int)log10((double)read_file_size) + 1) + 1;
-    char content_len_str[file_size_num_digits];
-    /* copy number into string */
-    if ( snprintf(content_len_str, file_size_num_digits, "%zu",
-                  read_file_size) > file_size_num_digits )
-        /* not a very critical error, no need to terminate server */
-        LOG_ERR("http_respond_fallback: snprintf: error in writing "
-                "Content-Length header");
+    response.status_code = status_code;
+    response.message     = buffer;
+    response.message_len = content_len;
 
-    http_header_init(response.first_header, "Connection", "Close",
-                     content_len_header);
-    http_header_init(content_len_header, "Content-Length", content_len_str,
-                     NULL);
+    struct http_header  headers[2];
+    struct http_header *content_len_header = &headers[0],
+                       *connection_header  = &headers[1];
+
+    response.first_header = headers;
+
+    /* stringify number of bytes to be sent in message content, +1 to make space
+     * for null byte */
+    char content_len_value[NUM_DIGITS(SIZE_T_MAX) + 1];
+    ret =
+        num_to_str(content_len_value, ARR_SIZE(content_len_value), content_len);
+    if ( ret < 0 ) LOG_ERR("snprintf: error in writing Content-Length header");
+
+    http_header_init(content_len_header, "Content-Length", content_len_value,
+                     connection_header);
+
+    if ( http_res_flags & CLOSE_CON ) {
+        http_header_init(connection_header, "Connection", "close", NULL);
+    } else {
+        http_header_init(connection_header, "Connection", "keep-alive", NULL);
+    }
+
     /* http_respond formats everything into a single message and allocates
      * memory for it. when http_respond returns, all memory allocated to
      * @response can be free'd */
     http_respond(con_data, &response);
-    http_free_response_headers(&response);
 }
 
 int append_response(struct client_data *con_data,

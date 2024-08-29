@@ -864,8 +864,9 @@ struct client_data *init_client_data(struct event_data *event) {
 
     if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
-    con_data->event           = event;
-    con_data->append_response = append_response;
+    con_data->event            = event;
+    con_data->append_response  = append_response;
+    con_data->close_connection = false;
 
     return con_data;
 }

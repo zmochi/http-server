@@ -25,49 +25,51 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
 }
 
 /**
- * @brief reads file at @filepath to @buf with capacity @buf_capacity, adds null
- * byte at end of read caller should repeatedly call this function until 0 is
- * returned to indicate end of file. at each call, caller should provide
- * last_len which is the number of bytes read by this function so far, and after
- * EOF its the total number of bytes read
+ * @brief reads from @file to @buf with capacity @buf_capacity.
  *
+ * caller should repeatedly call this function until EOF is reached, increasing
+ * buffer capacity on each call where EOF wasn't reached.
+ *
+ * @param file open file to read from, opened with fopen()
  * @param buf buffer to load file contents into
  * @param buf_capacity buffer capacity
- * @param filepath path to file
- * @param last_len size_t variable for internal use by the function. should be 0
- * on first call and passed to the function unchanged on every following call
- * @return number of bytes read in this call to the function, or -1 if an error
- * occurred
+ * @param total_read total size read from file by the function so far. should be
+ * 0 on first call and passed to the function unchanged on every following call.
+ * @return number of bytes written in this call to the function, -1 on EOF, or
+ * -2 if an error occurred
  */
-ev_ssize_t load_file_to_buf(char *restrict buf, size_t             buf_capacity,
-                            const char *restrict filepath, size_t *total_read) {
+ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
+                            size_t *total_read) {
+    const int FILE_FAIL = -2, FILE_EOF = -1;
     /* would prefer to mmap() file into memory but not cross-compatible that
      * way... */
-    FILE  *message_file = fopen(filepath, "r");
-    size_t ret, capacity = buf_capacity, last = *total_read;
+    size_t     ret_size_t, capacity = buf_capacity, last = *total_read;
+    ev_ssize_t ret;
 
-    if ( !message_file ) {
-        fprintf(stderr, "load_file_to_buf: couldn't open file at path %s\n",
-                filepath);
-        return -1;
+    /* read fread return value into an appropriate type: */
+    ret_size_t = fread(buf + last, sizeof(char), capacity - last, file);
+    if ( ret_size_t > EV_SSIZE_MAX ) {
+        LOG_ERR("fread: file contains more data than ssize_t can handle");
+        exit(1);
     }
-
-    ret = fread(buf + last, sizeof(char), capacity - last, message_file);
+    /* return value of fread fits in ssize_t, cast it: */
+    ret = ret_size_t;
 
     if ( ret < capacity - last ) {
-        if ( ferror(message_file) ) {
-            perror("load_file_to_buf: fread: ");
-            return -1;
-        } else if ( feof(message_file) ) {
+        if ( ferror(file) ) {
+            LOG_ERR("fread: %s", strerror(errno));
+            return FILE_FAIL;
+        } else if ( feof(file) ) {
             /* reached EOF */
-            fclose(message_file);
             *total_read += ret;
-            return 0;
+            return FILE_EOF;
+        } else {
+            LOG_ERR("unknown error");
+            exit(1);
         }
     }
 
     /* haven't reached EOF, caller must increase buffer capacity */
-    fclose(message_file);
     *total_read += ret;
     return ret;
 }

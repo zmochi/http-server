@@ -679,6 +679,26 @@ static inline void http_free_response_headers(http_res *response) {
 }
 
 /**
+ * @brief converts a non-negative size_t variable to a string (e.g 100 -> "100")
+ * adds a null byte at end of string
+ *
+ * @param str buffer to place the result in
+ * @param strcap capacity of buffer
+ * @param num num to stringify
+ * @return on success, number of characters written to @str, not including null
+ * byte. -1 on failure
+ */
+static inline ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
+    ev_ssize_t ret;
+
+    if ( (ret = snprintf(str, strcap, "%zu", num)) >= strcap ) {
+        return -1;
+    }
+
+    return ret;
+}
+
+/**
  * @brief sends default response for the specified @status_code
  * the response for status code XXX is expected to be found in the root folder
  * specified in config, under the name XXX.html

@@ -720,7 +720,7 @@ void http_respond_fallback(struct client_data *con_data,
     int status;
     /* for load_file_to_buf call: */
     ev_ssize_t ret;
-    size_t     content_len = 0;
+    size_t     content_len;
 
     /* to be free'd in send_cb, after sending its contents */
     char *buffer = malloc(send_buffer_capacity);
@@ -736,6 +736,7 @@ void http_respond_fallback(struct client_data *con_data,
 
     LOG("sending error from filename: %s", message_filepath);
 
+    content_len    = 0;
     FILE *msg_file = fopen(message_filepath, "r");
     while ( (ret = load_file_to_buf(msg_file, buffer, send_buffer_capacity,
                                     &content_len)) >= 0 ) {

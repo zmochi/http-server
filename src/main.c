@@ -636,52 +636,48 @@ void http_respond_fallback(struct client_data *con_data,
     http_res     response;
     size_t       send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
     const size_t MAX_FILE_READ_SIZE   = 1 << 27;
-    char         message_filepath[256];
-    int          status;
-    ev_ssize_t   msg_bytes_written;
+    char message_filepath[1024]; /* arbitrary size, should be big enough for any
+                                   path */
+    int status;
     /* for load_file_to_buf call: */
     ev_ssize_t ret;
-    size_t     read_file_size = 0;
+    size_t     content_len = 0;
 
     /* to be free'd in send_cb, after sending its contents */
     char *buffer = malloc(send_buffer_capacity);
     if ( !buffer ) HANDLE_ALLOC_FAIL();
 
     /* create path string of HTTP response with provided status code */
-    msg_bytes_written =
-        snprintf(message_filepath, sizeof(message_filepath), "%s/%d.html",
-                 server_conf.ROOT_PATH, status_code);
-    LOG("sending error from filename: %s/%d.html", server_conf.ROOT_PATH,
-        status_code);
-    LOG("message_filepath: %s", message_filepath);
-    catchExcp(msg_bytes_written > strlen(message_filepath),
-              "http_respond_fallback: snprintf: couldn't write html "
+    ret = snprintf(message_filepath, ARR_SIZE(message_filepath), "%s/%d.html",
+                   server_conf.ROOT_PATH, status_code);
+    catchExcp(ret > ARR_SIZE(message_filepath),
+              "snprintf: couldn't write html "
               "filename to buffer\n",
               1);
 
-    while ( (ret = load_file_to_buf(buffer, send_buffer_capacity,
-                                    message_filepath, &read_file_size)) > 0 ) {
+    LOG("sending error from filename: %s", message_filepath);
+
+    FILE *msg_file = fopen(message_filepath, "r");
+    while ( (ret = load_file_to_buf(msg_file, buffer, send_buffer_capacity,
+                                    &content_len)) >= 0 ) {
         /* resize buffer as needed, if file hasn't been fully read */
         status =
             handler_buf_realloc(&buffer, &send_buffer_capacity,
                                 MAX_FILE_READ_SIZE, send_buffer_capacity * 2);
 
-        /* switch for extensibility */
-        switch ( status ) {
-            case MAX_BUF_SIZE_EXCEEDED:
-                LOG_ERR(
-                    "http_respond_fallback: file at %s exceeds max read size",
-                    message_filepath);
-                goto exit_while;
-        }
+        if ( status == MAX_BUF_SIZE_EXCEEDED )
+            LOG_ERR("file at %s exceeds max read size", message_filepath);
     }
 
-    if ( ret < 0 ) {
-        LOG_ERR("http_respond_fallback: error in load_file_to_buf");
+    if ( ret == -1 && fclose(msg_file) != 0 ) {
+        /* reached EOF, failed closing msg_file */
+        LOG_ERR("fclose: %s", strerror(errno));
+        exit(1);
+    } else if ( ret <= -2 ) {
+        LOG_ERR("error in load_file_to_buf");
         exit(1);
     }
 
-    msg_bytes_written = read_file_size;
 
 exit_while:
 

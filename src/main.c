@@ -581,24 +581,22 @@ int http_respond(struct client_data *con_data, http_res *response) {
         }
     } */
 
+    /* append HTTP message content if exists */
     if ( response->message != NULL ) {
-        ret = snprintf(new_send_buf->buffer + bytes_written,
-                       new_send_buf->capacity - bytes_written, "%s\r\n",
-                       response->message);
-
-        string_len = strlen(response->message);
-
-        // memcpy(new_send_buf->buffer + bytes_written, response->message,
-        // string_len)
-
-        if ( ret >= string_len ) { // out of memory
-            // TODO: realloc send_buffer?
-        } else if ( ret < 0 ) {
-            LOG_ERR("http_respond: snprintf: response->message");
+        if ( response->message_len > new_send_buf->capacity - bytes_written ) {
+            // TODO: realloc buffer
+            LOG_ERR("reached unimplemented code");
             exit(1);
         }
 
-        bytes_written += ret;
+        memcpy(new_send_buf->buffer + bytes_written, response->message,
+               response->message_len);
+
+        bytes_written += response->message_len;
+
+    } else if ( response->message_len != 0 ) {
+        LOG_ERR("logic: http response message buffer is null but message_len "
+                "is not 0");
     }
 
     new_send_buf->actual_len = bytes_written;

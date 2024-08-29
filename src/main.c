@@ -111,6 +111,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
     // contains info about connection
     struct sockaddr_storage *sockaddr =
         calloc(1, sizeof(struct sockaddr_storage));
+    if ( !sockaddr ) HANDLE_ALLOC_FAIL();
     ev_socklen_t sockaddr_size = sizeof(struct sockaddr_storage);
 
     /* accept won't block here since accept_cb is called when there's a pending
@@ -803,7 +804,8 @@ int reset_con_data(struct client_data *con_data) {
     // initial size
     recv_buf->buffer =
         realloc(con_data->recv_buf->buffer, request_buffer_capacity);
-    // TODO: check success of realloc
+    if ( !recv_buf->buffer ) HANDLE_ALLOC_FAIL();
+
     recv_buf->capacity = request_buffer_capacity;
 
     memset(con_data, 0, sizeof(*con_data));

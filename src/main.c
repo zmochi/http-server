@@ -15,6 +15,10 @@ static config server_conf;
         exit(1);                                                               \
     }
 
+typedef enum {
+    CLOSE_CON = 1,
+} http_res_flag;
+
 int CLIENT_TIMEOUT_SEC;
 
 #define DFLT_CLIENT_TIMEOUT_SEC 3
@@ -35,7 +39,7 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
 int  recv_data(evutil_socket_t sockfd, struct client_data *con_data);
 int  http_respond(struct client_data *con_data, http_res *response);
 void http_respond_fallback(struct client_data *con_data,
-                           http_status_code    status_code);
+                           http_status_code status_code, int http_res_flags);
 int  populate_headers_map(struct client_data *con_data);
 int  reset_con_data(struct client_data *con_data);
 int  terminate_connection(struct client_data *con_data);
@@ -303,7 +307,8 @@ int http_handle_incomplete_req(struct client_data *con_data) {
         // TODO out of memory err in handler_buf_realloc
         switch ( status ) {
             case MAX_BUF_SIZE_EXCEEDED:
-                http_respond_fallback(con_data, Request_Entity_Too_Large);
+                http_respond_fallback(con_data, Request_Entity_Too_Large,
+                                      CLOSE_CON);
                 terminate_connection(con_data);
         }
     }
@@ -370,8 +375,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
             http_extract_validate_header("Host", strlen("Host"), NULL, 0);
 
         if ( !(host_header_flags & HEADER_EXISTS) ) {
-            http_handle_bad_request(con_data);
-            terminate_connection(con_data);
+            http_respond_fallback(con_data, Bad_Request, 0);
             return;
         }
     }
@@ -387,14 +391,12 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
         case HTTP_ENTITY_TOO_LARGE:
             /* http_respond_fallback sends Connection: close */
-            http_respond_fallback(con_data, Request_Entity_Too_Large);
-            terminate_connection(con_data);
+            http_respond_fallback(con_data, Request_Entity_Too_Large, 0);
             return;
 
         case HTTP_BAD_REQ:
             /* http_respond_fallback sends Connection: close */
-            http_respond_fallback(con_data, Bad_Request);
-            terminate_connection(con_data);
+            http_respond_fallback(con_data, Bad_Request, 0);
             return;
 
         case EXIT_SUCCESS:
@@ -412,13 +414,13 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     if ( strncmp(con_data->request->method, "GET",
                  con_data->request->method_len) ) {
         // do_GET(con_data); // TODO
-        http_respond_fallback(con_data, Method_Not_Allowed);
+        http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
         terminate_connection(con_data);
         return;
     } else {
         // TODO: there are separate codes for method not allowed and method not
         // supported?
-        http_respond_fallback(con_data, Method_Not_Allowed);
+        http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
         terminate_connection(con_data);
         return;
     }
@@ -629,9 +631,10 @@ void http_free_response_headers(http_res *response) {
  *
  * @param con_data client to send response to
  * @param status_code status code of the response
+ * @param http_res_flags a bitmask of flags from enum http_res_flag
  */
 void http_respond_fallback(struct client_data *con_data,
-                           http_status_code    status_code) {
+                           http_status_code status_code, int http_res_flags) {
     http_res     response;
     size_t       send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
     const size_t MAX_FILE_READ_SIZE   = 1 << 27;

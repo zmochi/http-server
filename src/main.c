@@ -20,6 +20,7 @@ typedef enum {
 } http_res_flag;
 
 int CLIENT_TIMEOUT_SEC;
+extern const int RECV_REALLOC_MUL;
 
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
@@ -474,6 +475,48 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
 }
 
 /**
+ * @brief copies a linked list of headers and formats them into a buffer
+ *
+ * @param headers list of headers
+ * @param buffer buffer to copy formatted headers to
+ * @param capacity buffer capacity
+ * @return number of bytes written on success, -1 if capacity is too small
+ */
+ev_ssize_t copy_headers_to_buf(struct http_header *headers, char *buffer,
+                               size_t capacity) {
+    const int NO_MEM_ERR    = -1;
+    size_t    bytes_written = 0;
+    /* the buffer start point and buffer capacity change while writing to the
+     * buffer. these variables hold the effective buffer and its effective
+     * capacity */
+    size_t eff_bufcap;
+    char  *eff_buf;
+    int    ret;
+
+    static const char *HEADER_FMT = "%s: %s\r\n";
+
+    for ( struct http_header *header = headers; header != NULL;
+          header                     = header->next ) {
+        eff_bufcap = capacity - bytes_written;
+        eff_buf    = buffer + bytes_written;
+
+        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header->header_name,
+                       header->header_value);
+
+        if ( ret > eff_bufcap ) { // out of memory, capacity too small
+            return NO_MEM_ERR;
+        } else if ( ret < 0 ) {
+            LOG_ERR("snprintf: headers: %s", strerror(errno));
+            exit(1);
+        }
+
+        bytes_written += ret;
+    }
+
+    return bytes_written;
+}
+
+/**
  * @brief [TODO:description]
  * after this functions returns, it is safe to free all data related to
  * @response and @response itself
@@ -499,8 +542,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
     char       date[128]; // temporary buffer to pass date string
     int        status_code = response->status_code;
     int        status;
-    size_t     ret, buflen, bytes_written = 0;
-    ev_ssize_t string_len;
+    size_t     buflen, bytes_written = 0;
+    ev_ssize_t ret, string_len;
 
     ret = strftime_gmtformat(date, sizeof(date));
     catchExcp(ret != EXIT_FAILURE,
@@ -527,33 +570,41 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     bytes_written += ret;
 
-    static const char *HEADER_FMT      = "%s: %s\r\n";
-    static const char *HEADER_SKELETON = ": \r\n";
-
     // copy headers to send buffer:
-    for ( struct http_header *header = response->first_header; header != NULL;
-          header                     = header->next ) {
-        ret = snprintf(new_send_buf->buffer + bytes_written,
-                       new_send_buf->capacity - bytes_written, HEADER_FMT,
-                       header->header_name, header->header_value);
+    ret = 0;
+    while ( ret >= 0 && response->first_header != NULL ) {
+        ret = copy_headers_to_buf(response->first_header,
+                                  new_send_buf->buffer + bytes_written,
+                                  new_send_buf->capacity - bytes_written);
 
-        /* the last strlen() is the characters always present in a header
-         * this weird length check is because we must get some expected length
-         * to compare against output of snprintf */
-        string_len = strlen(header->header_name) +
-                     strlen(header->header_value) + strlen(HEADER_SKELETON);
+        if ( ret == 0 ) {
+            LOG_ERR(
+                "copy_headers_to_buf: no bytes written even though there was "
+                "at least 1 header to write");
+        } else if ( ret == -1 ) {
+            ret = handler_buf_realloc(
+                &new_send_buf->buffer, &new_send_buf->capacity,
+                MAX_SEND_BUFFER_SIZE,
+                RECV_REALLOC_MUL * new_send_buf->capacity);
+            if ( ret == MAX_BUF_SIZE_EXCEEDED ) {
+                http_respond_fallback(con_data, Request_Entity_Too_Large,
+                                      CLOSE_CON);
+                terminate_connection(con_data);
+            }
 
-        if ( ret > string_len ) { // out of memory
-            // TODO: realloc send buffer
-            LOG_ERR("http_respond: snprintf: headers out of memory");
-            exit(1);
-        } else if ( ret < 0 ) {
-            LOG_ERR("http_respond: snprintf: headers");
+        } else if ( ret < -1 ) {
+            LOG_ERR("copy_headers_to_buf: unknown return value");
             exit(1);
         }
-
-        bytes_written += ret;
     }
+
+    bytes_written += ret;
+
+    // TODO: realloc buffer is capacity is not big enough
+    char *HEADERS_END_FMT = "\r\n";
+    memcpy(new_send_buf->buffer + bytes_written, HEADERS_END_FMT,
+           strlen(HEADERS_END_FMT));
+    bytes_written += strlen(HEADERS_END_FMT);
 
     // load contents of file to buffer, reallocate and keep loading from
     // last place if needed:

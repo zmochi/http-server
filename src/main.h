@@ -42,6 +42,8 @@
 #define SEND_REALLOC_MULTIPLIER   2
 #define MAX_SEND_BUFFER_SIZE      MAX_RECV_BUFFER_SIZE
 
+const int RECV_REALLOC_MUL = 2;
+
 enum http_req_props {
     HTTP_BAD_REQ          = -1,
     HTTP_INCOMPLETE_REQ   = -2,

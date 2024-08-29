@@ -39,9 +39,9 @@
 #define INIT_BUFFER_SIZE          256
 #define INIT_SEND_BUFFER_CAPACITY (1 << 10) // 1KB
 #define MAX_RECV_BUFFER_SIZE      (1 << 30) // 1GB
-#define SEND_REALLOC_MULTIPLIER   2
 #define MAX_SEND_BUFFER_SIZE      MAX_RECV_BUFFER_SIZE
 
+const int SEND_REALLOC_MUL = 2;
 const int RECV_REALLOC_MUL = 2;
 
 enum http_req_props {

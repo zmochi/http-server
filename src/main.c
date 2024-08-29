@@ -18,7 +18,6 @@ static config server_conf;
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
-int              CLIENT_TIMEOUT_SEC;
 const int SEND_REALLOC_MUL = 2;
 const int RECV_REALLOC_MUL = 2;
 
@@ -67,12 +66,10 @@ int init_server(config conf) {
     struct event      *event_accept;
     struct event      *event_write;
 
-    server_conf = conf;
+    server_conf      = conf;
+    int conf_timeout = conf.timeout;
 
-    if ( conf.timeout != 0 )
-        CLIENT_TIMEOUT_SEC = conf.timeout;
-    else
-        CLIENT_TIMEOUT_SEC = DFLT_CLIENT_TIMEOUT_SEC;
+    if ( conf_timeout == 0 ) conf_timeout = DFLT_CLIENT_TIMEOUT_SEC;
 
     base = event_base_new();
     catchExcp(base == NULL, "Couldn't open event base.", 1);
@@ -81,7 +78,8 @@ int init_server(config conf) {
 
     /* event_self_cbarg uses magic to pass event_accept as
         an argument to the event_new cb function */
-    struct event_data event_accept_args = {.base = base};
+    struct event_data event_accept_args = {.base    = base,
+                                           .timeout = conf_timeout};
 
     /* event_accept is triggered when there's a new connection and calls
      * accept_cb
@@ -159,7 +157,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
     status = event_add(event_write, NULL);
     catchExcp(status == -1, "event_add: couldn't add write event", 1);
 
-    struct timeval client_timeout = INIT_CLIENT_TIMEOUT;
+    struct timeval client_timeout = con_data->event->timeout;
     status                        = event_add(event_close_con, &client_timeout);
     catchExcp(status == -1, "event_add: couldn't add close-connection event",
               1);

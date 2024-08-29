@@ -60,6 +60,7 @@ enum http_header_props {
 struct event_data { // TODO: change name to client_ev_data
     struct event_base *base;
     evutil_socket_t    sockfd;
+    struct timeval     timeout;
     void              *event_read;
     void              *event_write;
     void              *event_close_con;

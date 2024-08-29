@@ -261,10 +261,11 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
     printf("sent!");
 
     if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
-        // all data sent
+        // all data sent, finished_sending gets next send buffer in the queue.
+        // if there is no next buffer, and close_connection is flagged,
+        // terminate connection
         if ( finished_sending(con_data) && con_data->close_connection )
             terminate_connection(con_data);
-        // event_active(con_data->event->event_close_con, 0, 0);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
@@ -320,11 +321,6 @@ int http_handle_incomplete_req(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
-int http_handle_bad_request(struct client_data *con_data) {
-    http_respond_fallback(con_data, Bad_Request);
-    return EXIT_SUCCESS;
-}
-
 void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
@@ -344,7 +340,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
         switch ( status ) {
             case HTTP_BAD_REQ:
-                http_handle_bad_request(con_data);
+                http_respond_fallback(con_data, Bad_Request, 0);
                 return;
 
             case HTTP_INCOMPLETE_REQ:
@@ -374,9 +370,10 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     /* special rules for HTTP 1.1 */
     if ( con_data->request->minor_ver == 1 ) {
+        const char *HOST_HEADER_NAME = "Host";
         /* host header is required on HTTP 1.1 */
-        short host_header_flags =
-            http_extract_validate_header("Host", strlen("Host"), NULL, 0);
+        short host_header_flags = http_extract_validate_header(
+            HOST_HEADER_NAME, strlen(HOST_HEADER_NAME), NULL, 0);
 
         if ( !(host_header_flags & HEADER_EXISTS) ) {
             http_respond_fallback(con_data, Bad_Request, 0);
@@ -548,7 +545,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
     ev_ssize_t ret, string_len;
 
     ret = strftime_gmtformat(date, sizeof(date));
-    catchExcp(ret != EXIT_FAILURE,
+    catchExcp(ret != EXIT_SUCCESS,
               "strftime_gmtformat: couldn't write date into buffer", 1);
 
     buflen = new_send_buf->capacity;
@@ -565,9 +562,12 @@ int http_respond(struct client_data *con_data, http_res *response) {
     if ( ret >= buflen ) {
         LOG_ERR("http_respond: Initial capacity of send buffer is not big "
                 "enough for the base HTTP response format");
-        /* this really shouldn't happen and is fixable by simply increasing the
-         * initial capacity, so just exit */
+        /* this really shouldn't happen and is permanently fixable by simply
+         * increasing the initial capacity, so just exit */
         exit(EXIT_FAILURE);
+    } else if ( ret < 0 ) {
+        LOG_ERR("http_respond: snprintf: base_fmt: %s", strerror(errno));
+        exit(1);
     }
 
     bytes_written += ret;
@@ -659,14 +659,16 @@ int http_respond(struct client_data *con_data, http_res *response) {
     return 0;
 }
 
-void http_header_init(struct http_header *header, const char *header_name,
-                      const char *header_value, struct http_header *next) {
+static inline void http_header_init(struct http_header *header,
+                                    const char         *header_name,
+                                    const char         *header_value,
+                                    struct http_header *next) {
     header->header_name  = header_name;
     header->header_value = header_value;
     header->next         = next;
 }
 
-void http_free_response_headers(http_res *response) {
+static inline void http_free_response_headers(http_res *response) {
     struct http_header *next, *header = response->first_header;
 
     while ( header != NULL ) {

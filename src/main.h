@@ -10,10 +10,14 @@
 
 #endif
 
+/* internal libs: */
 #include "../libs/boost/CURRENT_FUNCTION.hpp"
 #include "../libs/picohttpparser/picohttpparser.h"
 
+/* libevent: */
 #include <event2/event.h>
+
+/* cross-platform, C standard libraries: */
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -110,8 +114,9 @@ struct http_header {
 
 typedef struct {
     http_status_code    status_code;
-    const char         *message;
-    struct http_header *first_header;
+    const char         *message;      /* HTTP response content */
+    size_t              message_len;
+    struct http_header *first_header; /* linked list of headers */
 } http_res;
 
 typedef struct {

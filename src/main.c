@@ -19,8 +19,8 @@ static config server_conf;
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
 int              CLIENT_TIMEOUT_SEC;
-extern const int SEND_REALLOC_MUL;
-extern const int RECV_REALLOC_MUL;
+const int SEND_REALLOC_MUL = 2;
+const int RECV_REALLOC_MUL = 2;
 
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}

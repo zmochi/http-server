@@ -41,8 +41,8 @@
 #define MAX_RECV_BUFFER_SIZE      (1 << 30) // 1GB
 #define MAX_SEND_BUFFER_SIZE      MAX_RECV_BUFFER_SIZE
 
-const int SEND_REALLOC_MUL = 2;
-const int RECV_REALLOC_MUL = 2;
+extern const int SEND_REALLOC_MUL;
+extern const int RECV_REALLOC_MUL;
 
 enum http_req_props {
     HTTP_BAD_REQ          = -1,

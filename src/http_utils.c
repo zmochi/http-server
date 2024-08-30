@@ -1,6 +1,8 @@
 #include "http_utils.h"
 #include "headers.h"
 
+extern const int BACKLOG;
+
 /**
  * @brief gets current GMT time in the format (example) "Sun, 01 Jan 1970
  * 00:00:00 GMT"

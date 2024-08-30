@@ -38,15 +38,8 @@
 // all sizes are in bytes
 /* avoid 0 and 1 values since they're used to indicate general success/failure
  */
-#define SOCKET_ERROR              -1
-#define BACKLOG                   64
-#define INIT_BUFFER_SIZE          256
-#define INIT_SEND_BUFFER_CAPACITY (1 << 10) // 1KB
-#define MAX_RECV_BUFFER_SIZE      (1 << 30) // 1GB
-#define MAX_SEND_BUFFER_SIZE      MAX_RECV_BUFFER_SIZE
-
-extern const int SEND_REALLOC_MUL;
-extern const int RECV_REALLOC_MUL;
+#define SOCKET_ERROR          -1
+#define MAX_BUF_SIZE_EXCEEDED 2
 
 enum http_req_props {
     HTTP_BAD_REQ          = -1,

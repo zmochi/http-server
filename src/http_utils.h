@@ -1,7 +1,5 @@
 #include "main.h"
 
-#define MAX_BUF_SIZE_EXCEEDED 2
-
 struct addrinfo *get_local_addrinfo(const char *port);
 int              local_socket_bind_listen(const char *port);
 

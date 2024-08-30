@@ -8,6 +8,15 @@
 
 static config server_conf;
 
+/* from http_limits.c: */
+extern const int SEND_REALLOC_MUL;
+extern const int RECV_REALLOC_MUL;
+extern const int REQ_HEADER_VALUES_MAX_SIZE;
+extern const int MAX_RECV_BUFFER_SIZE;
+extern const int INIT_SEND_BUFFER_CAPACITY;
+extern const int MAX_SEND_BUFFER_SIZE;
+extern const int INIT_BUFFER_SIZE;
+
 #define HANDLE_ALLOC_FAIL()                                                    \
     {                                                                          \
         LOG_ERR("Allocation failed in function %s at line %d",                 \
@@ -17,9 +26,6 @@ static config server_conf;
 
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
-
-const int SEND_REALLOC_MUL = 2;
-const int RECV_REALLOC_MUL = 2;
 
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}

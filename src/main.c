@@ -582,13 +582,14 @@ int http_respond(struct client_data *con_data, http_res *response) {
     bytes_written += ret;
 
     // copy headers to send buffer:
-    ret = 0;
-    while ( ret >= 0 && response->first_header != NULL ) {
+    ret = -1;
+    while ( ret < 0 && response->first_header != NULL ) {
         ret = copy_headers_to_buf(response->first_header,
                                   new_send_buf->buffer + bytes_written,
                                   new_send_buf->capacity - bytes_written);
 
         if ( ret == 0 ) {
+            /* shouldn't happen, but not a critical error */
             LOG_ERR(
                 "copy_headers_to_buf: no bytes written even though there was "
                 "at least 1 header to write");
@@ -602,7 +603,6 @@ int http_respond(struct client_data *con_data, http_res *response) {
                                       CLOSE_CON);
                 terminate_connection(con_data);
             }
-
         } else if ( ret < -1 ) {
             LOG_ERR("copy_headers_to_buf: unknown return value");
             exit(1);

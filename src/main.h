@@ -1,3 +1,4 @@
+#include "headers.h"
 #include "status_codes.h"
 #ifdef _WIN32
 #include <winsock.h>
@@ -64,12 +65,12 @@ struct event_data { // TODO: change name to client_ev_data
 };
 
 typedef struct {
-    const char       *method, *path;
-    size_t            method_len, path_len, num_headers;
-    int               minor_ver;
-    struct phr_header headers[MAX_NUM_HEADERS];
-    size_t            message_length;
-    char             *message;
+    const char     *method, *path;
+    size_t          method_len, path_len, num_headers;
+    int             minor_ver;
+    struct hashset *headers;
+    size_t          message_length;
+    char           *message;
 } http_req;
 
 struct send_buffer {
@@ -95,14 +96,6 @@ struct client_data {
     bool                close_connection;
     int (*append_response)(struct client_data *con_data,
                            struct send_buffer *response);
-};
-
-/* linked list of HTTP headers, embedded in http_res */
-struct http_header {
-    const char         *header_name;
-    const char         *header_value;
-    uint16_t            header_len;
-    struct http_header *next;
 };
 
 typedef struct {

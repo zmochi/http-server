@@ -53,13 +53,13 @@ int  recv_data(evutil_socket_t sockfd, struct client_data *con_data);
 int  http_respond(struct client_data *con_data, http_res *response);
 void http_respond_fallback(struct client_data *con_data,
                            http_status_code status_code, int http_res_flags);
-int  populate_headers_map(struct client_data *con_data);
 int  reset_con_data(struct client_data *con_data);
 int  terminate_connection(struct client_data *con_data);
 struct client_data *init_client_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
 
-int  http_parse_request(struct client_data *con_data);
+int  http_parse_request(struct client_data *con_data,
+                        struct phr_header header_arr[], size_t *num_headers);
 int  http_parse_content(struct client_data *con_data, size_t *content_length);
 int  http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
                                  size_t buffer_len, http_req *http_request,
@@ -345,7 +345,10 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         /* parses everything preceding the content from request, populates
          * con_data->request->headers with pointers to the HTTP headers and
          * their values in the original request */
-        status = http_parse_request(con_data);
+        struct phr_header headers[MAX_NUM_HEADERS];
+        /* must be initialized to capacity of @headers */
+        size_t num_headers = MAX_NUM_HEADERS;
+        status = http_parse_request(con_data, headers, &num_headers);
 
         switch ( status ) {
             case HTTP_BAD_REQ:
@@ -368,7 +371,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
         // statusline + headers are complete:
         // populate headers hashmap with pointers to phr_header's
-        populate_headers_map(con_data);
+        populate_headers_map(con_data->request->headers, headers, num_headers);
         con_data->recv_buf->headers_parsed = true;
     }
 
@@ -382,7 +385,8 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         const char *HOST_HEADER_NAME = "Host";
         /* host header is required on HTTP 1.1 */
         short host_header_flags = http_extract_validate_header(
-            HOST_HEADER_NAME, strlen(HOST_HEADER_NAME), NULL, 0);
+            con_data->request->headers, HOST_HEADER_NAME,
+            strlen(HOST_HEADER_NAME), NULL, 0);
 
         if ( !(host_header_flags & HEADER_EXISTS) ) {
             http_respond_fallback(con_data, Bad_Request, 0);
@@ -825,9 +829,7 @@ static inline int init_client_request(struct client_data *con_data) {
     con_data->request = calloc(1, sizeof(*con_data->request));
     if ( !con_data->request ) return EXIT_FAILURE;
 
-    /* the following should match the size of array in con_data->request, which
-     * is set in definition of http_req */
-    con_data->request->num_headers = MAX_NUM_HEADERS;
+    con_data->request->headers = malloc_init_hashset();
 
     return EXIT_SUCCESS;
 }
@@ -950,7 +952,7 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
                 content_length == 0 */
         /* populate content_length variable with value from user */
         content_length_header_flags = http_extract_content_length(
-            content_length,
+            con_data->request->headers, content_length,
             MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_received);
     }
 
@@ -988,8 +990,8 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
 
     // TODO: implement http_extract_transfer_encoding
     content_length_header_flags = http_extract_validate_header(
-        "Transfer-Encoding", strlen("Transfer-Encoding"), "chunked",
-        strlen("chunked"));
+        con_data->request->headers, "Transfer-Encoding",
+        strlen("Transfer-Encoding"), "chunked", strlen("chunked"));
 
     if ( content_length_header_flags & HEADER_EXISTS &&
          content_length_header_flags & HEADER_VALUE_VALID ) {
@@ -1021,7 +1023,8 @@ int http_parse_content(struct client_data *con_data, size_t *content_length) {
  * -2 on incomplete HTTP request
  * TODO: simplify code
  */
-int http_parse_request(struct client_data *con_data) {
+int http_parse_request(struct client_data *con_data,
+                       struct phr_header header_arr[], size_t *num_headers) {
     char       *buffer        = con_data->recv_buf->buffer;
     size_t      buffer_len    = con_data->recv_buf->capacity;
     http_req   *request       = con_data->request;

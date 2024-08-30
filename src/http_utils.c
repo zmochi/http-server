@@ -76,46 +76,35 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     return ret;
 }
 
-int populate_headers_map(struct client_data *con_data) {
-    struct phr_header *headers     = con_data->request->headers;
-    size_t             num_headers = con_data->request->num_headers;
+int populate_headers_map(struct hashset *set, struct phr_header headers[],
+                         size_t num_headers) {
 
-    for ( int i = 0; i < con_data->request->num_headers; i++ ) {
-        struct hash_header *header =
-            http_get_header(headers[i].name, headers[i].name_len);
-
-        // TODO: make portable and fix logic (header would probably never be
-        // null)
-        // Assuming 2's complement, where -0 == 0 in bit presentation and
-        // 0xFFFF.. represents -1, and assuming sign extended bitshift.
-        header->req_header =
-            (struct phr_header *)((intptr_t)&headers[i] *
-                                  (-(-((intptr_t)header) >>
-                                     (sizeof(intptr_t) * CHAR_BIT - 1))));
-        // this is the branchless version of:
-        // if ( header != NULL ) { // Recognized header
-        //     header->req_header = &headers[i];
-        // } else {
-        //     header->req_header = NULL;
-        // }
+    for ( int i = 0; i < num_headers; i++ ) {
+        struct phr_header header = headers[i];
+        http_set_header(set, header.name, header.name_len, header.value,
+                        header.value_len);
     }
     return 0;
 }
 
-int http_extract_validate_header(const char *restrict header_name,
+int http_extract_validate_header(struct hashset *set,
+                                 const char *restrict header_name,
                                  size_t header_name_len,
                                  const char *restrict expected_value,
                                  size_t expected_value_len) {
-    short              header_flags = 0;
-    struct phr_header *header =
-        http_get_header(header_name, header_name_len)->req_header;
+    short header_flags = 0;
+    int   header_value_len;
+    char *header_value =
+        http_get_header(set, header_name, header_name_len, &header_value_len);
 
-    if ( header != NULL ) {
+    if ( header_value_len != 0 ) {
         header_flags |= HEADER_EXISTS;
 
-        /* if header exists we can check its value: */
-        if ( expected_value != NULL && /* expected value was passed */
-             strncmp(header->value, expected_value, expected_value_len) == 0 ) {
+#define MIN(a, b) ((a < b) ? a : b)
+        /* compare against expected value if needed: */
+        if ( expected_value != NULL &&
+             strncmp(header_value, expected_value,
+                     MIN(expected_value_len, header_value_len)) == 0 ) {
             header_flags |= HEADER_VALUE_VALID;
         }
     }
@@ -123,38 +112,34 @@ int http_extract_validate_header(const char *restrict header_name,
     return header_flags;
 }
 
-int http_extract_content_length(size_t *content_length_storage,
-                                size_t  max_content_length) {
+int http_extract_content_length(struct hashset *set,
+                                size_t         *content_length_storage,
+                                size_t          max_content_length) {
 
-    short              header_flags = 0;
-    struct phr_header *header_content_len =
-        http_get_header("Content-Length", strlen("Content-Length"))->req_header;
+    short header_flags = 0;
+    int   content_len_strlen;
+    char *content_len_str = http_get_header(
+        set, "Content-Length", strlen("Content-Length"), &content_len_strlen);
 
-    if ( header_content_len == NULL ) {
+    if ( content_len_strlen == 0 ) {
         return header_flags;
     }
-
-    // TODO: maybe strlen above returns incorrect length because of null byte?
-    size_t content_len_str_size = header_content_len->value_len;
-    char   content_len_str[content_len_str_size + 1];
 
     header_flags |= HEADER_EXISTS;
 
-    if ( !is_integer(header_content_len->value, content_len_str_size) ) {
+    if ( !is_integer(content_len_str, content_len_strlen) ) {
         return header_flags;
     }
 
-    header_flags |= HEADER_VALUE_VALID;
-
-    memcpy(content_len_str, header_content_len->value, content_len_str_size);
     // set null byte at end of string for call to `strtoumax`:
-    *(content_len_str + content_len_str_size + 1) =
-        '\x00'; // maybe change to memset?
+    *(content_len_str + content_len_strlen + 1) = '\x00';
 
     uintmax_t content_length = strtoumax(content_len_str, NULL, 10);
 
     if ( content_length > max_content_length ) {
-        return (header_flags ^ HEADER_VALUE_VALID) | HEADER_VALUE_EXCEEDS_MAX;
+        header_flags |= HEADER_VALUE_EXCEEDS_MAX;
+    } else {
+        header_flags |= HEADER_VALUE_VALID;
     }
 
     *content_length_storage =

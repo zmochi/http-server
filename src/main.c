@@ -17,21 +17,19 @@ static config server_conf;
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
 
+/* some of these flags are passed to event_active(), they should be negative so
+ * they don't accidentally collide with libevent's flags (which are all
+ * positive) */
 typedef enum {
-    CLOSE_CON = 1,
-} http_res_flag;
-
-typedef enum {
-    RECV_NODATA     = -1,
-    RECV_CONNRESET  = -2,
-    RECV_CONNCLOSED = -3,
-} recv_flags;
-
-#define DFLT_CLIENT_TIMEOUT_SEC 3
-#define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
+    RECV_NODATA      = -1,
+    CON_RESET        = -2,
+    SERV_CON_CLOSE   = -3,
+    CLIENT_CON_CLOSE = -4,
+} con_flags;
 
 void accept_cb(evutil_socket_t, short, void *);
 void send_cb(evutil_socket_t sockfd, short flags, void *arg);
+
 /**
  * @brief Callback function to read data sent from client.
  *
@@ -46,8 +44,8 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg);
  * @param sockfd socket of connection
  * @param con_data connection data
  * @return RECV_NODATA if there is no data to receive (but connection hasn't
- * been closed) RECV_CONNRESET if client forcibly closed connection (TCP RST
- * packet) RECV_CONNCLOSED if client gracefully closed connection (TCP FIN
+ * been closed) CONN_RESET if client forcibly closed connection (TCP RST
+ * packet) CLIENT_CON_CLOSE if client gracefully closed connection (TCP FIN
  * packet)
  */
 int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
@@ -59,7 +57,6 @@ int         reset_con_data(struct client_data *con_data);
 static void reset_http_req(http_req *request);
 int         terminate_connection(struct client_data *con_data);
 struct client_data *init_client_data(struct event_data *ev_data);
-int                 close_connection(struct client_data *con_data);
 
 int  http_parse_request(struct client_data *con_data,
                         struct phr_header header_arr[], size_t *num_headers);
@@ -192,23 +189,26 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
  * @param arg ptr to struct client_data of connection
  */
 void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
-    LOG("close_con_cb");
-    struct client_data *con_data           = (struct client_data *)arg;
-    struct recv_buffer *recv_buf           = con_data->recv_buf;
-    struct send_buffer *send_buf           = con_data->send_buf;
-    bool                timed_out          = flags & EV_TIMEOUT;
-    bool                close_requested    = con_data->close_connection;
-    bool                unsent_data_exists = !(con_data->send_buf == NULL);
+    LOG();
+    struct client_data *con_data               = (struct client_data *)arg;
+    struct recv_buffer *recv_buf               = con_data->recv_buf;
+    struct send_buffer *send_buf               = con_data->send_buf;
+    bool                timed_out              = flags & EV_TIMEOUT;
+    bool                server_close_requested = flags & SERV_CON_CLOSE;
+    bool                client_closed_con      = flags & CLIENT_CON_CLOSE;
+    bool                unsent_data_exists     = !(con_data->send_buf == NULL);
 
     if ( timed_out ) LOG("timed_out");
     if ( close_requested ) LOG("close_request");
     if ( unsent_data_exists ) LOG("unsent_data_exis");
     /* don't close connection if close wasn't requested or
      * connection didn't timeout */
-    if ( !(close_requested || timed_out) ) return;
+    if ( !(server_close_requested || client_closed_con || timed_out) ) return;
 
-    /* if unsent data exists, send it and don't close connection */
-    if ( unsent_data_exists ) {
+    /* if unsent data exists, send it and don't close connection
+     * if connection timed out/client closed connection, continue (discard
+     * unsent data) */
+    if ( unsent_data_exists && !timed_out && !client_closed_con ) {
         event_active(con_data->event->event_write, 0, 0);
         return;
     }
@@ -340,7 +340,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
         switch ( status ) {
             case MAX_BUF_SIZE_EXCEEDED:
                 http_respond_fallback(con_data, Request_Entity_Too_Large,
-                                      CLOSE_CON);
+                                      SERV_CON_CLOSE);
                 terminate_connection(con_data);
         }
     }
@@ -362,9 +362,10 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
                     "though libevent triggered a read event");
             return;
 
-        case RECV_CONNRESET:
+        case CON_RESET:
             LOG("client forcibly closed connection");
-        case RECV_CONNCLOSED:
+        case CLIENT_CON_CLOSE:
+            LOG("client gracefully closed connection");
             terminate_connection(con_data);
             return;
 
@@ -466,10 +467,10 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     if ( strncmp(con_data->request->method, "GET",
                  con_data->request->method_len) ) {
         // do_GET(con_data); // TODO
-        http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
+        http_respond_fallback(con_data, Method_Not_Allowed, SERV_CON_CLOSE);
         terminate_connection(con_data);
     } else {
-        http_respond_fallback(con_data, Not_Implemented, CLOSE_CON);
+        http_respond_fallback(con_data, Not_Implemented, SERV_CON_CLOSE);
         terminate_connection(con_data);
     }
 
@@ -489,7 +490,7 @@ int terminate_connection(struct client_data *con_data) {
 
     con_data->close_connection = true;
 
-    event_active(con_data->event->event_close_con, 0, 0);
+    event_active(con_data->event->event_close_con, SERV_CON_CLOSE, 0);
 
     return 0;
 }
@@ -505,7 +506,7 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
         switch ( EVUTIL_SOCKET_ERROR() ) {
             case ECONNRESET:
                 LOG("Connection reset by client");
-                return RECV_CONNRESET;
+                return CON_RESET;
 
             case EWOULDBLOCK:
 /* EWOULDBLOCK and EAGAIN are the same type of error in this case. some systems
@@ -522,7 +523,7 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
                 exit(1);
         }
     } else if ( nbytes == 0 ) {
-        return RECV_CONNCLOSED;
+        return CLIENT_CON_CLOSE;
     }
 
     recv_buf->bytes_received += nbytes;
@@ -648,7 +649,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
                 RECV_REALLOC_MUL * new_send_buf->capacity);
             if ( ret == MAX_BUF_SIZE_EXCEEDED ) {
                 http_respond_fallback(con_data, Request_Entity_Too_Large,
-                                      CLOSE_CON);
+                                      SERV_CON_CLOSE);
                 terminate_connection(con_data);
             }
         } else if ( ret < -1 ) {
@@ -838,7 +839,7 @@ void http_respond_fallback(struct client_data *con_data,
     http_header_init(content_len_header, "Content-Length", content_len_value,
                      connection_header);
 
-    if ( http_res_flags & CLOSE_CON ) {
+    if ( http_res_flags & SERV_CON_CLOSE ) {
         http_header_init(connection_header, "Connection", "close", NULL);
     } else {
         http_header_init(connection_header, "Connection", "keep-alive", NULL);

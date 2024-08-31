@@ -469,9 +469,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
         terminate_connection(con_data);
     } else {
-        // TODO: there are separate codes for method not allowed and method not
-        // supported?
-        http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
+        http_respond_fallback(con_data, Not_Implemented, CLOSE_CON);
         terminate_connection(con_data);
     }
 

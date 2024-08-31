@@ -241,14 +241,14 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     if ( !(con_data->request == NULL) )
         free(con_data->request);
     else {
-        LOG_ERR("close_con_cb: request is NULL when closing connection!");
+        LOG_ERR("critical: request is NULL");
         exit(EXIT_FAILURE);
     }
 
     if ( !(con_data == NULL) )
         free(con_data);
     else {
-        LOG_ERR("close_con_cb: con_data is NULL when closing connection!");
+        LOG_ERR("critical: con_data is NULL");
         exit(EXIT_FAILURE);
     }
     printf("\n");

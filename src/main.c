@@ -389,10 +389,11 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
         /* parses everything preceding the content from request, populates
-         * con_data->request->headers with pointers to the HTTP headers and
+         * @headers array with pointers to the HTTP headers and
          * their values in the original request */
         struct phr_header headers[MAX_NUM_HEADERS];
-        /* must be initialized to capacity of @headers */
+        /* must be initialized to capacity of @headers, after http_parse_request
+         * returns its value is changed to the actual nyumber of headers */
         size_t num_headers = MAX_NUM_HEADERS;
         status = http_parse_request(con_data, headers, &num_headers);
 
@@ -416,7 +417,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         }
 
         // statusline + headers are complete:
-        // populate headers hashmap with pointers to phr_header's
+        // populate headers hashmap
         populate_headers_map(con_data->request->headers, headers, num_headers);
         con_data->recv_buf->headers_parsed = true;
     }

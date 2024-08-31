@@ -11,7 +11,6 @@
 #endif
 
 /* internal libs: */
-#include "../libs/boost/CURRENT_FUNCTION.hpp"
 #include "../libs/picohttpparser/picohttpparser.h"
 
 /* libevent: */
@@ -27,13 +26,6 @@
 
 #ifndef __MAIN_H
 #define __MAIN_H
-
-/* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG(fmt, ...)                                                          \
-    printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
-#define LOG_ERR(fmt, ...)                                                      \
-    fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
-            ##__VA_ARGS__)
 
 // all sizes are in bytes
 /* avoid 0 and 1 values since they're used to indicate general success/failure
@@ -64,12 +56,16 @@ struct event_data { // TODO: change name to client_ev_data
 };
 
 typedef struct {
-    const char       *method, *path;
-    size_t            method_len, path_len, num_headers;
+    /* pointers to the method and path in original client recv buf */
+    const char *method, *path;
+    /* lengths of method and path strings above */
+    size_t            method_len, path_len;
+    size_t            num_headers;
     int               minor_ver;
     struct phr_header headers[MAX_NUM_HEADERS];
-    size_t            message_length;
-    char             *message;
+    /* points to content of HTTP req from client */
+    char  *message;
+    size_t message_length;
 } http_req;
 
 struct send_buffer {

@@ -1,4 +1,26 @@
+#include "../libs/boost/CURRENT_FUNCTION.hpp"
+#include "headers.h"
 #include "main.h"
+
+#ifndef __HTTP_UTILS_H
+#define __HTTP_UTILS_H
+
+/* ##__VA_ARGS__ requires compiling with gcc or clang */
+#define LOG(fmt, ...)                                                          \
+    printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
+#define LOG_ERR(fmt, ...)                                                      \
+    fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
+            ##__VA_ARGS__)
+
+#define HANDLE_ALLOC_FAIL()                                                    \
+    {                                                                          \
+        LOG_ERR("Allocation failed in function %s at line %d",                 \
+                BOOST_CURRENT_FUNCTION, __LINE__);                             \
+        exit(1);                                                               \
+    }
+
+/* returns size_t of statically allocated array */
+#define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
 struct addrinfo *get_local_addrinfo(const char *port);
 int              local_socket_bind_listen(const char *port);
@@ -26,3 +48,5 @@ const char *stringify_statuscode(http_status_code status_code);
 bool        is_integer(const char str[], int str_len);
 int         strftime_gmtformat(char *buf, size_t buflen);
 void        catchExcp(int condition, const char *err_msg, int action);
+
+#endif /* __HTTP_UTILS_H */

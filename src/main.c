@@ -1,5 +1,6 @@
 #include "main.h"
 #include "headers.h"
+#include "http_limits.h"
 #include "http_utils.h"
 #include "status_codes.h"
 
@@ -7,25 +8,6 @@
 #include <math.h>
 
 static config server_conf;
-
-/* from http_limits.c: */
-extern const int SEND_REALLOC_MUL;
-extern const int RECV_REALLOC_MUL;
-extern const int REQ_HEADER_VALUES_MAX_SIZE;
-extern const int MAX_RECV_BUFFER_SIZE;
-extern const int INIT_SEND_BUFFER_CAPACITY;
-extern const int MAX_SEND_BUFFER_SIZE;
-extern const int INIT_BUFFER_SIZE;
-
-#define HANDLE_ALLOC_FAIL()                                                    \
-    {                                                                          \
-        LOG_ERR("Allocation failed in function %s at line %d",                 \
-                BOOST_CURRENT_FUNCTION, __LINE__);                             \
-        exit(1);                                                               \
-    }
-
-/* returns size_t of statically allocated array */
-#define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
@@ -181,7 +163,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
 
 /**
  * @brief callback function for when a connection times out OR when connection
- * should be closed manually (using libevent's event_active()) to trigger this
+ * should be closed manually (using libevent's event_active() to trigger this
  * manually)
  *
  * @param sockfd socket of connection
@@ -210,6 +192,8 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     if ( recv_buf != NULL ) finished_receiving(con_data);
     /* free send buffers (and discard data to be sent) if connection timed out
      */
+    // TODO: refactor because this code doesn't make sense and decide whether,
+    // on timeout, should remaining responses be sent or discarded */
     if ( send_buf != NULL )
         // if ( timed_out )
         /* each call to finished_sending frees the next buffer in queue of
@@ -245,16 +229,18 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     struct client_data *con_data = (struct client_data *)arg;
 
-    // printf("send_cb! actual_len = %lu\n", con_data->send_buf->actual_len);
+    bool is_close_requested  = con_data->close_connection;
+    bool is_send_queue_empty = con_data->send_buf == NULL;
 
-    if ( con_data->close_connection && con_data->send_buf == NULL ) {
-        // event_active(con_data->event->event_close_con, 0, 0);
+    if ( is_close_requested && is_send_queue_empty ) {
         terminate_connection(con_data);
         return;
-    } else if ( con_data->send_buf == NULL )
+    } else if ( is_send_queue_empty ) {
         /* nothing to send */
         return;
+    }
 
+    /* send pending responses */
     struct send_buffer send_buf = *(con_data->send_buf);
     size_t             nbytes = 0, total_bytes = 0;
 
@@ -267,13 +253,13 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
         exit(1);
     }
 
-    printf("sent!");
+    LOG("sent!");
 
     if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
-        // all data sent, finished_sending gets next send buffer in the queue.
-        // if there is no next buffer, and close_connection is flagged,
-        // terminate connection
-        if ( finished_sending(con_data) && con_data->close_connection )
+        /* all data sent, finished_sending gets next send buffer in the queue.
+         * if there is no next buffer, and close_connection is flagged,
+         * terminate connection */
+        if ( finished_sending(con_data) && is_close_requested )
             terminate_connection(con_data);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
@@ -535,6 +521,7 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, char *buffer,
  */
 int http_respond(struct client_data *con_data, http_res *response) {
     /* the struct send_buffer and associated buffer will be free'd in send_cb */
+    /* TODO: refactor the initialization of a send_buf into a function */
     struct send_buffer *new_send_buf = calloc(1, sizeof(*new_send_buf));
     if ( !new_send_buf ) HANDLE_ALLOC_FAIL();
     new_send_buf->buffer = malloc(INIT_SEND_BUFFER_CAPACITY);
@@ -728,9 +715,11 @@ void http_respond_fallback(struct client_data *con_data,
     ev_ssize_t ret;
     size_t     content_len;
 
-    /* to be free'd in send_cb, after sending its contents */
-    char *buffer = malloc(send_buffer_capacity);
-    if ( !buffer ) HANDLE_ALLOC_FAIL();
+    /* this buffer should be dynamically allocated since it might need to be
+     * resized, if file contents are too big. will be free'd in send_cb, after
+     * sending its contents */
+    char *file_contents_buf = malloc(send_buffer_capacity);
+    if ( !file_contents_buf ) HANDLE_ALLOC_FAIL();
 
     /* create path string of HTTP response with provided status code */
     ret = snprintf(message_filepath, ARR_SIZE(message_filepath), "%s/%d.html",
@@ -744,11 +733,12 @@ void http_respond_fallback(struct client_data *con_data,
 
     content_len    = 0;
     FILE *msg_file = fopen(message_filepath, "r");
-    while ( (ret = load_file_to_buf(msg_file, buffer, send_buffer_capacity,
-                                    &content_len)) >= 0 ) {
+    while ( (ret = load_file_to_buf(msg_file, file_contents_buf,
+                                    send_buffer_capacity, &content_len)) >=
+            0 ) {
         /* resize buffer as needed, if file hasn't been fully read */
         status =
-            handler_buf_realloc(&buffer, &send_buffer_capacity,
+            handler_buf_realloc(&file_contents_buf, &send_buffer_capacity,
                                 MAX_FILE_READ_SIZE, send_buffer_capacity * 2);
 
         if ( status == MAX_BUF_SIZE_EXCEEDED )
@@ -772,7 +762,7 @@ void http_respond_fallback(struct client_data *con_data,
                        *connection_header  = &headers[1];
 
     response.status_code  = status_code;
-    response.message      = buffer;
+    response.message      = file_contents_buf;
     response.message_len  = content_len;
     response.first_header = headers;
 
@@ -819,7 +809,7 @@ int append_response(struct client_data *con_data,
 
 /**
  * @brief initalizes the @request struct in struct client_data
- * @return EXIT_FAILURE on failure to allocate memory
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure to allocate memory
  */
 static inline int init_client_request(struct client_data *con_data) {
     con_data->request = calloc(1, sizeof(*con_data->request));
@@ -837,7 +827,7 @@ static inline int init_client_request(struct client_data *con_data) {
  * @return EXIT_FAILURE on failure to allocate memory
  */
 static inline int init_client_recv_buf(struct client_data *con_data) {
-    int request_buffer_capacity = INIT_BUFFER_SIZE;
+    int request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
 
     con_data->recv_buf = calloc(1, sizeof(*con_data->recv_buf));
     if ( !con_data->recv_buf ) return EXIT_FAILURE;
@@ -873,7 +863,7 @@ struct client_data *init_client_data(struct event_data *event) {
 }
 
 int reset_con_data(struct client_data *con_data) {
-    int                 request_buffer_capacity = INIT_BUFFER_SIZE;
+    int                 request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
     struct event_data  *event                   = con_data->event;
     http_req           *req_data                = con_data->request;
     struct send_buffer *send_buf                = con_data->send_buf;
@@ -908,8 +898,8 @@ int finished_receiving(struct client_data *con_data) {
     return 0;
 }
 
-int request_processed(struct client_data *con_data) {
-    struct recv_buffer *recv_buf = con_data->recv_buf;
+int finish_request_processing(struct client_data *con_data) {
+    http_req *request = con_data->request;
 
     return EXIT_SUCCESS;
 }

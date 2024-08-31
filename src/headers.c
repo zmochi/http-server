@@ -32,6 +32,7 @@
 #line 2 "HTTP_fields.gperf"
 
 #include "headers.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define TOTAL_KEYWORDS 167
@@ -380,7 +381,7 @@ http_lookup_header (register const char *str, register size_t len)
     }
   return 0;
 }
-#line 180 "HTTP_fields.gperf"
+#line 181 "HTTP_fields.gperf"
 
 const size_t arr_len  = MAX_HASH_VALUE;
 const size_t arr_size = arr_len * sizeof(struct header_value);

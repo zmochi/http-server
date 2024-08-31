@@ -4,8 +4,13 @@
 #include "http_utils.h"
 #include "status_codes.h"
 
+/* internal libs: */
+#include "../libs/picohttpparser/picohttpparser.h"
+
 /* for log10() function used in http_respond_fallback */
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 static config server_conf;
 
@@ -180,6 +185,9 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     bool                close_requested    = con_data->close_connection;
     bool                unsent_data_exists = !(con_data->send_buf == NULL);
 
+    if ( timed_out ) LOG("timed_out");
+    if ( close_requested ) LOG("close_request");
+    if ( unsent_data_exists ) LOG("unsent_data_exis");
     /* don't close connection if close wasn't requested or
      * connection didn't timeout */
     if ( !(close_requested || timed_out) ) return;
@@ -189,6 +197,8 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
         event_active(con_data->event->event_write, 0, 0);
         return;
     }
+
+    LOG("closing connection");
     /* free recv buffer if not free'd already */
     if ( recv_buf == NULL )
         LOG_ERR("critical: recv_buf is NULL when connection is closed");
@@ -225,6 +235,7 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
         LOG_ERR("close_con_cb: con_data is NULL when closing connection!");
         exit(EXIT_FAILURE);
     }
+    printf("\n");
 }
 
 void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
@@ -236,10 +247,12 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
     bool is_send_queue_empty = con_data->send_buf == NULL;
 
     if ( is_close_requested && is_send_queue_empty ) {
+        LOG("terminating connection");
         terminate_connection(con_data);
         return;
     } else if ( is_send_queue_empty ) {
         /* nothing to send */
+        LOG("nothing to send");
         return;
     }
 
@@ -294,6 +307,7 @@ bool finished_sending(struct client_data *con_data) {
 }
 
 int http_handle_incomplete_req(struct client_data *con_data) {
+    LOG(":)");
     /* TODO circular recv: shouldn't resize buffer every time in circular buffer
      */
     int status;
@@ -328,6 +342,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
      * recv() is called, the event loop will call recv_cb again */
     // TODO: handle errors from recv_data
     recv_data(sockfd, con_data);
+    LOG("received data %.20s", con_data->recv_buf->buffer);
 
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
@@ -712,6 +727,7 @@ static inline ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
  */
 void http_respond_fallback(struct client_data *con_data,
                            http_status_code status_code, int http_res_flags) {
+    LOG();
     http_res     response;
     size_t       send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
     const size_t MAX_FILE_READ_SIZE   = 1 << 27;

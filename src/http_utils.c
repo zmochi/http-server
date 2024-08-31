@@ -1,6 +1,9 @@
 #include "http_utils.h"
 #include "headers.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 extern const int BACKLOG;
 
 /**

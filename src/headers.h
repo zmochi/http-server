@@ -5,7 +5,6 @@
 
 #include "../libs/picohttpparser/picohttpparser.h"
 #include <stdbool.h>
-#include <stdlib.h>
 
 struct http_header {
     /* this union allows accessing the fields of struct phr_header as if they

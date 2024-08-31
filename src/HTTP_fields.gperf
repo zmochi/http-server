@@ -1,6 +1,7 @@
 // if any of the names defined below are changed, make sure to update the functions at the bottom
 %{
 #include "headers.h"
+#include <stdlib.h>
 %}
 %compare-strncmp 
 %global-table

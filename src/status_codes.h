@@ -1,8 +1,6 @@
 #ifndef __STATUS_CODES_H
 #define __STATUS_CODES_H
 
-/* Defined in status_codes.c */
-
 typedef enum {
     OK                       = 200,
     Bad_Request              = 400,

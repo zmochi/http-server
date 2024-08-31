@@ -4,15 +4,10 @@
 #include <winsock.h>
 #else // Unix probably?
 #include <netdb.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
 #endif
-
-/* internal libs: */
-#include "../libs/picohttpparser/picohttpparser.h"
 
 /* libevent: */
 #include <event2/event.h>
@@ -22,7 +17,6 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <time.h>
 
 #ifndef __MAIN_H

@@ -283,7 +283,7 @@ bool finished_sending(struct client_data *con_data) {
 
     /* if there is another buffer to be queued */
     if ( next != NULL ) {
-        con_data->send_buf = con_data->send_buf->next;
+        con_data->send_buf = next;
         return false;
     } else {
         return true;

@@ -200,7 +200,6 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     bool unsent_data_exists     = !(con_data->send_buf == NULL);
 
     if ( timed_out ) LOG("timed_out");
-    if ( close_requested ) LOG("close_request");
     if ( unsent_data_exists ) LOG("unsent_data_exis");
     /* don't close connection if close wasn't requested or
      * connection didn't timeout */
@@ -259,14 +258,9 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     struct client_data *con_data = (struct client_data *)arg;
 
-    bool is_close_requested  = con_data->close_connection;
     bool is_send_queue_empty = con_data->send_buf == NULL;
 
-    if ( is_close_requested && is_send_queue_empty ) {
-        LOG("terminating connection");
-        terminate_connection(con_data);
-        return;
-    } else if ( is_send_queue_empty ) {
+    if ( is_send_queue_empty ) {
         /* nothing to send */
         LOG("nothing to send");
         return;
@@ -288,11 +282,8 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
     LOG("sent!");
 
     if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
-        /* all data sent, finished_sending gets next send buffer in the queue.
-         * if there is no next buffer, and close_connection is flagged,
-         * terminate connection */
-        if ( finished_sending(con_data) && is_close_requested )
-            terminate_connection(con_data);
+        /* all data sent, get next send buffer in the queue. */
+        finished_sending(con_data);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
@@ -488,8 +479,6 @@ int terminate_connection(struct client_data *con_data) {
     //     con_data->close_connection = true;
     //     close_connection(con_data);
     // }
-
-    con_data->close_connection = true;
 
     event_active(con_data->event->event_close_con, SERV_CON_CLOSE, 0);
 
@@ -923,9 +912,8 @@ struct client_data *init_client_data(struct event_data *event) {
 
     if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
-    con_data->event            = event;
-    con_data->append_response  = append_response;
-    con_data->close_connection = false;
+    con_data->event           = event;
+    con_data->append_response = append_response;
 
     return con_data;
 }

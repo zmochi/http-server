@@ -85,7 +85,6 @@ struct client_data {
     struct send_buffer *last;
     struct recv_buffer *recv_buf;
     http_req           *request;
-    bool                close_connection;
     int (*append_response)(struct client_data *con_data,
                            struct send_buffer *response);
 };

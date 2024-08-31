@@ -21,6 +21,12 @@ typedef enum {
     CLOSE_CON = 1,
 } http_res_flag;
 
+typedef enum {
+    RECV_NODATA     = -1,
+    RECV_CONNRESET  = -2,
+    RECV_CONNCLOSED = -3,
+} recv_flags;
+
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
 
@@ -33,10 +39,19 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg);
  * callback function), the client may send data. This function receives the
  * data and closes the connection. Signature matches the required signature
  * for callback function in documentation of `event_new()`.
+
+/**
+ * @brief Receives pending data in @sockfd into the recv buffer in @con_data
+ *
+ * @param sockfd socket of connection
+ * @param con_data connection data
+ * @return RECV_NODATA if there is no data to receive (but connection hasn't
+ * been closed) RECV_CONNRESET if client forcibly closed connection (TCP RST
+ * packet) RECV_CONNCLOSED if client gracefully closed connection (TCP FIN
+ * packet)
  */
-void        recv_cb(evutil_socket_t, short, void *);
+int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
 void        close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
-int         recv_data(evutil_socket_t sockfd, struct client_data *con_data);
 int         http_respond(struct client_data *con_data, http_res *response);
 void        http_respond_fallback(struct client_data *con_data,
                                   http_status_code status_code, int http_res_flags);
@@ -340,8 +355,27 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     /* this function calls recv() once, populates con_data->recv_buf, and
      * returns appropriate error codes. If there's still data to read after
      * recv() is called, the event loop will call recv_cb again */
-    // TODO: handle errors from recv_data
-    recv_data(sockfd, con_data);
+    status = recv_data(sockfd, con_data);
+    switch ( status ) {
+        case RECV_NODATA:
+            LOG_ERR("suspicious: No data to receive on an open connection even "
+                    "though libevent triggered a read event");
+            return;
+
+        case RECV_CONNRESET:
+            LOG("client forcibly closed connection");
+        case RECV_CONNCLOSED:
+            terminate_connection(con_data);
+            return;
+
+        case EXIT_SUCCESS:
+            break;
+
+        default:
+            LOG_ERR("critical: unknown return value from recv_data()");
+            exit(1);
+    }
+
     LOG("received data %.20s", con_data->recv_buf->buffer);
 
     /* if HTTP headers were not parsed and put in con_data yet: */
@@ -472,18 +506,25 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
     if ( nbytes == SOCKET_ERROR ) {
         switch ( EVUTIL_SOCKET_ERROR() ) {
             case ECONNRESET:
-                // TODO: handle connection reset by client
-                return -1;    // -1 for unknown error? until the TODO is done
+                LOG("Connection reset by client");
+                return RECV_CONNRESET;
 
-            case EWOULDBLOCK: // Shouldn't happen at all, socket should always
-                              // be non-blocking
-                LOG_ERR("EWOULDBLOCK!");
+            case EWOULDBLOCK:
+/* EWOULDBLOCK and EAGAIN are the same type of error in this case. some systems
+ * define them to be different values so need to have a case for both */
+#if EWOULDBLOCK != EAGAIN
+            case EAGAIN:
+#endif
+                LOG_ERR("No data to receive");
+                return RECV_NODATA;
 
             default:
-                LOG_ERR("recv: %s",
+                LOG_ERR("critical: %s",
                         evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
                 exit(1);
         }
+    } else if ( nbytes == 0 ) {
+        return RECV_CONNCLOSED;
     }
 
     recv_buf->bytes_received += nbytes;

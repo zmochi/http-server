@@ -288,7 +288,7 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
     } else {
-        LOG_ERR("send_cb: unknown error while sending data");
+        LOG_ERR("unknown error while sending data");
         exit(1);
     }
 }
@@ -457,7 +457,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
     // because there aren't that many methods, performance impact should be
     // negligible?
     if ( strncmp(con_data->request->method, "GET",
-                 con_data->request->method_len) ) {
+                 con_data->request->method_len) == 0 ) {
         // do_GET(con_data); // TODO
         http_respond_fallback(con_data, Method_Not_Allowed, SERV_CON_CLOSE);
         terminate_connection(con_data);

@@ -22,8 +22,8 @@
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
-struct addrinfo *get_local_addrinfo(const char *port);
-int              local_socket_bind_listen(const char *port);
+ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
+                               char *buffer, size_t capacity);
 
 /**
  * @brief Loads entire contents of file specified by filepath into `buf`.
@@ -50,7 +50,8 @@ int         handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
                                 ev_ssize_t new_size);
 const char *stringify_statuscode(http_status_code status_code);
 bool        is_integer(const char str[], int str_len);
-int         strftime_gmtformat(char *buf, size_t buflen);
-void        catchExcp(int condition, const char *err_msg, int action);
+extern inline ev_ssize_t num_to_str(char *str, size_t strcap, size_t num);
+int                      strftime_gmtformat(char *buf, size_t buflen);
+void catchExcp(int condition, const char *err_msg, int action);
 
 #endif /* __HTTP_UTILS_H */

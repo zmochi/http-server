@@ -30,6 +30,51 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
 }
 
 /**
+ * @brief copies and formats an array of headers into a buffer
+ *
+ * @param headers array of headers
+ * @param num_headers number of elements in headers array
+ * @param buffer buffer to copy formatted headers to
+ * @param capacity buffer capacity
+ * @return number of bytes written on success, -1 if capacity is too small
+ */
+ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
+                               char *buffer, size_t capacity) {
+    const int NO_MEM_ERR    = -1;
+    size_t    bytes_written = 0;
+    /* the buffer start point and buffer capacity change while writing to the
+     * buffer. these variables hold the effective buffer and its effective
+     * capacity */
+    size_t eff_bufcap;
+    char  *eff_buf;
+    int    ret;
+
+    static const char *HEADER_FMT = "%s: %s\r\n";
+
+    for ( size_t i = 0; i < num_headers; i++ ) {
+        struct http_header header = headers[i];
+        eff_bufcap                = capacity - bytes_written;
+        eff_buf                   = buffer + bytes_written;
+
+        /* snprintf should be fine since HTTP standard disallows null bytes in
+         * header values */
+        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header.header_name,
+                       header.header_value);
+
+        if ( ret > eff_bufcap ) { // out of memory, capacity too small
+            return NO_MEM_ERR;
+        } else if ( ret < 0 ) {
+            LOG_ERR("snprintf: headers: %s", strerror(errno));
+            exit(1);
+        }
+
+        bytes_written += ret;
+    }
+
+    return bytes_written;
+}
+
+/**
  * @brief reads from @file to @buf with capacity @buf_capacity.
  *
  * caller should repeatedly call this function until EOF is reached, increasing
@@ -170,78 +215,23 @@ int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
 }
 
 /**
- * @brief needs refactoring
+ * @brief converts a non-negative size_t variable to a string (e.g 100 -> "100")
+ * adds a null byte at end of string
  *
- * @param servinfo
- * @return int
+ * @param str buffer to place the result in
+ * @param strcap capacity of buffer
+ * @param num num to stringify
+ * @return on success, number of characters written to @str, not including null
+ * byte. -1 on failure
  */
-evutil_socket_t local_socket_bind_listen(const char *restrict port) {
-    struct addrinfo *servinfo = get_local_addrinfo(port);
-    struct addrinfo *servinfo_next;
-    struct sockaddr *sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
-    int              status;
-    evutil_socket_t  main_sockfd;
+ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
+    ev_ssize_t ret;
 
-    for ( servinfo_next = servinfo; servinfo_next != NULL;
-          servinfo_next = servinfo_next->ai_next ) {
-
-        main_sockfd =
-            socket(servinfo_next->ai_family, servinfo_next->ai_socktype,
-                   servinfo_next->ai_protocol);
-
-        if ( main_sockfd == EVUTIL_INVALID_SOCKET ) {
-            perror("socket");
-            continue;
-        }
-
-        status = evutil_make_listen_socket_reuseable(main_sockfd);
-        if ( status < 0 ) {
-            perror("evutil_make_listen_socket_reusable");
-            continue;
-        }
-
-        status = bind(main_sockfd, servinfo_next->ai_addr,
-                      servinfo_next->ai_addrlen);
-        if ( status != 0 ) {
-            /*On Unix, returns -1 on error. On Windows, returns
-      SOCKET_ERROR, for which I can't find a libevent specific
-      implementation. But if no error occurs, 0 is returned both on
-      Windows and Unix. So this should be fine.*/
-            perror("bind");
-            continue;
-        }
-
-        status = listen(main_sockfd, BACKLOG);
-        if ( status < 0 ) {
-            perror("listen");
-            continue;
-        }
-
-        break;
+    if ( (ret = snprintf(str, strcap, "%zu", num)) >= strcap ) {
+        return -1;
     }
 
-    catchExcp(servinfo_next == NULL, "local_socket_bind_listen error", 1);
-
-    freeaddrinfo(servinfo);
-
-    return main_sockfd;
-}
-
-struct addrinfo *get_local_addrinfo(const char *restrict port) {
-    struct addrinfo  hints;
-    struct addrinfo *res;
-    int              status;
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family   = AF_UNSPEC;
-    hints.ai_flags    = AI_PASSIVE;
-
-    status = getaddrinfo(NULL, port, &hints, &res);
-
-    catchExcp(status != 0, gai_strerror(status), 1);
-
-    return res;
+    return ret;
 }
 
 /**

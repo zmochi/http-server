@@ -18,9 +18,9 @@ MAKE = make
 CC = clang
 
 # header file names with path relative to $(H_DIR)
-_HDEPS = headers.h main.h http_utils.h status_codes.h
+_HDEPS = headers.h main.h http_utils.h status_codes.h http_limits.h parser.h
 # c file names with path relative to $(SRC_DIR)
-_CDEPS = headers.c main.c http_utils.c status_codes.c http_limits.c
+_CDEPS = headers.c main.c http_utils.c status_codes.c http_limits.c parser.c
 HDEPS = $(patsubst %.h,$(H_DIR)/%.h,$(_HDEPS))
 CDEPS = $(patsubst %.c,$(SRC_DIR)/%.c,$(_CDEPS))
 OBJ = $(patsubst %.c,$(O_DIR)/%.o,$(_CDEPS))

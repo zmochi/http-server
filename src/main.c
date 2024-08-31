@@ -2,6 +2,7 @@
 #include "headers.h"
 #include "http_limits.h"
 #include "http_utils.h"
+#include "parser.h"
 #include "status_codes.h"
 
 /* internal libs: */
@@ -26,6 +27,9 @@ typedef enum {
     SERV_CON_CLOSE   = -3,
     CLIENT_CON_CLOSE = -4,
 } con_flags;
+
+struct addrinfo *get_local_addrinfo(const char *port);
+int              local_socket_bind_listen(const char *port);
 
 void accept_cb(evutil_socket_t, short, void *);
 void send_cb(evutil_socket_t sockfd, short flags, void *arg);
@@ -52,6 +56,7 @@ void recv_cb(evutil_socket_t, short, void *);
  * packet)
  */
 int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
+
 /**
  * @brief Callback function that handles closing connections
  *
@@ -64,7 +69,8 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
  * @param flags libevent flags
  * @param arg struct client_data of connection
  */
-void        close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
+void close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
+
 int         http_respond(struct client_data *con_data, http_res *response);
 void        http_respond_fallback(struct client_data *con_data,
                                   http_status_code status_code, int http_res_flags);
@@ -73,13 +79,6 @@ static void reset_http_req(http_req *request);
 int         terminate_connection(struct client_data *con_data);
 struct client_data *init_client_data(struct event_data *ev_data);
 
-int  http_parse_request(struct client_data *con_data,
-                        struct phr_header header_arr[], size_t *num_headers);
-int  http_parse_content(struct client_data *con_data, size_t *content_length);
-int  http_recv_and_parse_request(evutil_socket_t sockfd, char *buffer,
-                                 size_t buffer_len, http_req *http_request,
-                                 ev_ssize_t *bytes_received,
-                                 ev_ssize_t *bytes_parsed);
 bool finished_sending(struct client_data *con_data);
 int  finished_receiving(struct client_data *con_data);
 
@@ -535,51 +534,6 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
 }
 
 /**
- * @brief copies and formats an array of headers into a buffer
- *
- * @param headers array of headers
- * @param num_headers number of elements in headers array
- * @param buffer buffer to copy formatted headers to
- * @param capacity buffer capacity
- * @return number of bytes written on success, -1 if capacity is too small
- */
-ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
-                               char *buffer, size_t capacity) {
-    const int NO_MEM_ERR    = -1;
-    size_t    bytes_written = 0;
-    /* the buffer start point and buffer capacity change while writing to the
-     * buffer. these variables hold the effective buffer and its effective
-     * capacity */
-    size_t eff_bufcap;
-    char  *eff_buf;
-    int    ret;
-
-    static const char *HEADER_FMT = "%s: %s\r\n";
-
-    for ( size_t i = 0; i < num_headers; i++ ) {
-        struct http_header header = headers[i];
-        eff_bufcap                = capacity - bytes_written;
-        eff_buf                   = buffer + bytes_written;
-
-        /* snprintf should be fine since HTTP standard disallows null bytes in
-         * header values */
-        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header.header_name,
-                       header.header_value);
-
-        if ( ret > eff_bufcap ) { // out of memory, capacity too small
-            return NO_MEM_ERR;
-        } else if ( ret < 0 ) {
-            LOG_ERR("snprintf: headers: %s", strerror(errno));
-            exit(1);
-        }
-
-        bytes_written += ret;
-    }
-
-    return bytes_written;
-}
-
-/**
  * @brief [TODO:description]
  * after this functions returns, it is safe to free all data related to
  * @response and @response itself
@@ -739,26 +693,6 @@ static inline void http_free_response_headers(http_res *response) {
         free(header);
         header = next;
     }
-}
-
-/**
- * @brief converts a non-negative size_t variable to a string (e.g 100 -> "100")
- * adds a null byte at end of string
- *
- * @param str buffer to place the result in
- * @param strcap capacity of buffer
- * @param num num to stringify
- * @return on success, number of characters written to @str, not including null
- * byte. -1 on failure
- */
-static inline ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
-    ev_ssize_t ret;
-
-    if ( (ret = snprintf(str, strcap, "%zu", num)) >= strcap ) {
-        return -1;
-    }
-
-    return ret;
 }
 
 /**
@@ -988,138 +922,77 @@ int finish_request_processing(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
-// TODO: add documentation for transfer_encoding part
-
 /**
- * @brief Manages content in the request part of the specified `con_data`
- * Marks the content as parsed in `con_data` if the user specified
- * Content-Length is <= the number of bytes received (Assuming the headers
- * were parsed and put into the hashmap before calling this function). Sets
- * `bytes_parsed`  `con_data` to number of bytes in request if all expected data
- * arrived.
+ * @brief needs refactoring
  *
- * @param con_data Connection data to manage
- * @param content_length Pointer to content_length, to be set by the method
- * to the content length specified by the request
- * @return HTTP_INCOMPLETE_REQ when the Content-Length header value < bytes
- * received via recv
- * HTTP_ENTITY_TOO_LARGE when the user-specified Content-Length is bigger
- * than maximum recv buffer size
- * HTTP_BAD_REQ if the Content-Length header has an invalid value.
- * EXIT_SUCCESS if all expected content was received
+ * @param servinfo
+ * @return int
  */
-int http_parse_content(struct client_data *con_data, size_t *content_length) {
-    short content_length_header_flags;
+evutil_socket_t local_socket_bind_listen(const char *restrict port) {
+    struct addrinfo *servinfo = get_local_addrinfo(port);
+    struct addrinfo *servinfo_next;
+    struct sockaddr *sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
+    int              status;
+    evutil_socket_t  main_sockfd;
 
-    /* WARNING: processing user input and using user-provided value
-     *
-     * http_extract_content_length validates the Content-Length header from user
-     * and puts its value in content_length
-     */
+    for ( servinfo_next = servinfo; servinfo_next != NULL;
+          servinfo_next = servinfo_next->ai_next ) {
 
-    /* check if we already got the content length */
-    if ( *content_length > 0 ) {
-        content_length_header_flags = HEADER_EXISTS | HEADER_VALUE_VALID;
-    } else { /* content_length is of type size_t, so if this is reached
-                content_length == 0 */
-        /* populate content_length variable with value from user */
-        content_length_header_flags = http_extract_content_length(
-            con_data->request->headers, content_length,
-            MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_received);
+        main_sockfd =
+            socket(servinfo_next->ai_family, servinfo_next->ai_socktype,
+                   servinfo_next->ai_protocol);
+
+        if ( main_sockfd == EVUTIL_INVALID_SOCKET ) {
+            perror("socket");
+            continue;
+        }
+
+        status = evutil_make_listen_socket_reuseable(main_sockfd);
+        if ( status < 0 ) {
+            perror("evutil_make_listen_socket_reusable");
+            continue;
+        }
+
+        status = bind(main_sockfd, servinfo_next->ai_addr,
+                      servinfo_next->ai_addrlen);
+        if ( status != 0 ) {
+            /*On Unix, returns -1 on error. On Windows, returns
+      SOCKET_ERROR, for which I can't find a libevent specific
+      implementation. But if no error occurs, 0 is returned both on
+      Windows and Unix. So this should be fine.*/
+            perror("bind");
+            continue;
+        }
+
+        status = listen(main_sockfd, BACKLOG);
+        if ( status < 0 ) {
+            perror("listen");
+            continue;
+        }
+
+        break;
     }
 
-    if ( !(content_length_header_flags & HEADER_EXISTS) ) {
-        /* no Content-Length header, indicate parsing is finished */
-        return EXIT_SUCCESS;
-    }
-    /* if user-provided Content-Length header has an invalid value */
-    if ( !(content_length_header_flags & HEADER_VALUE_VALID) ) {
-        if ( content_length_header_flags & HEADER_VALUE_EXCEEDS_MAX )
-            return HTTP_ENTITY_TOO_LARGE;
-        else
-            return HTTP_BAD_REQ;
-    }
+    catchExcp(servinfo_next == NULL, "local_socket_bind_listen error", 1);
 
-    /* incomplete request: need to receive more data/reallocate buffer, to match
-     * user-provided Content-Length value */
-    if ( con_data->recv_buf->bytes_received <
-         *content_length + con_data->recv_buf->bytes_parsed )
-        return HTTP_INCOMPLETE_REQ;
+    freeaddrinfo(servinfo);
 
-    /* we choose to trust the user-supplied Content-Length value
-     * here as long as its smaller than the maximum buffer size, and the total
-     * amount of bytes parsed + Content-Length does not exceed the amount of
-     * bytes received (checked above)
-     *
-     * this might pose a problem if the recv_buffer wasn't cleared somehow for
-     * this connection, but this shouldn't happen.
-     */
-    con_data->recv_buf->bytes_parsed += *content_length;
-    con_data->recv_buf->content_parsed = true;
-
-    /* indicate parsing is finished */
-    return EXIT_SUCCESS;
-
-    // TODO: implement http_extract_transfer_encoding
-    content_length_header_flags = http_extract_validate_header(
-        con_data->request->headers, "Transfer-Encoding",
-        strlen("Transfer-Encoding"), "chunked", strlen("chunked"));
-
-    if ( content_length_header_flags & HEADER_EXISTS &&
-         content_length_header_flags & HEADER_VALUE_VALID ) {
-        // TODO: procedure for transfer encoding
-    } else { // no content / invalid header value
-
-        // RFC 2616, 3.6.1, ignore Transfer-Encoding's the server doesn't
-        // understand, so don't terminate on invalid header value
-        con_data->recv_buf->content_parsed = true;
-    }
-
-    return EXIT_SUCCESS;
+    return main_sockfd;
 }
 
-/** TODO: fix documentation
- * @brief Calls `recv()` on `sockfd` and stored the result in `buffer`.
- * Can be called multiple times as long as the request is incomplete, and
- * updates `bytes_received`, `bytes_parsed`, `request` accordingly.
- *
- * Should only be called when there is data to receive!
- * @param sockfd Socket to receive
- * @param buffer Pointer to buffer containing the request
- * @param buffer_len Length/size of `buffer`
- * @param request A special `http_req` struct
- * @param bytes_received Total bytes received from previous calls to this
- * method
- * @param bytes_parsed Total bytes parsed in previous calls to this method
- * @return -1 on illegal HTTP request format
- * -2 on incomplete HTTP request
- * TODO: simplify code
- */
-int http_parse_request(struct client_data *con_data,
-                       struct phr_header header_arr[], size_t *num_headers) {
-    char       *buffer        = con_data->recv_buf->buffer;
-    size_t      buffer_len    = con_data->recv_buf->capacity;
-    http_req   *request       = con_data->request;
-    ev_ssize_t *byte_received = &con_data->recv_buf->bytes_received;
-    ev_ssize_t *bytes_parsed  = &con_data->recv_buf->bytes_parsed;
-    /* phr_parse_request returns the *total* length of the HTTP request line +
-     * headers for each call, so for each iteration use = instead of += */
-    *bytes_parsed = phr_parse_request(buffer, buffer_len, &request->method,
-                                      &request->method_len, &request->path,
-                                      &request->path_len, &request->minor_ver,
-                                      header_arr, num_headers, *bytes_parsed);
+struct addrinfo *get_local_addrinfo(const char *restrict port) {
+    struct addrinfo  hints;
+    struct addrinfo *res;
+    int              status;
 
-    /* TODO circular recv: continue parsing request from buffer start if buffer
-    end was reached */
+    memset(&hints, 0, sizeof hints);
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_flags    = AI_PASSIVE;
 
-    switch ( *bytes_parsed ) {
-        case HTTP_BAD_REQ: // bad request
-            return HTTP_BAD_REQ;
+    status = getaddrinfo(NULL, port, &hints, &res);
 
-        case HTTP_INCOMPLETE_REQ: // incomplete request
-            return HTTP_INCOMPLETE_REQ;
+    catchExcp(status != 0, gai_strerror(status), 1);
 
-        default:
-            return EXIT_SUCCESS;
-    }
+    return res;
 }

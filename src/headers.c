@@ -382,20 +382,34 @@ http_lookup_header (register const char *str, register size_t len)
 }
 #line 180 "HTTP_fields.gperf"
 
-extern inline struct hashset *malloc_init_hashset(void) {
+const size_t arr_len  = MAX_HASH_VALUE;
+const size_t arr_size = arr_len * sizeof(struct header_value);
+
+extern inline struct header_hashset *malloc_init_hashset(void) {
     /* just an array of struct http_header*, the index for a header string @str
      * is given by http_hash_header(str, strlen(str)) */
-    size_t          arr_len = MAX_HASH_VALUE;
-    struct hashset *set     = malloc(sizeof(struct hashset));
-    set->arr                = malloc(arr_len * sizeof(struct header_value));
-    set->value_storage_ptr  = set->value_storage;
+    struct header_hashset *set = malloc(sizeof(struct header_hashset));
+    set->arr                   = malloc(arr_size);
+    memset(set->arr, 0, arr_size);
+    /* TODO: can initialize in O(1) */
+    set->value_storage_ptr = set->value_storage;
     /* TODO: check malloc() fail */
 
     return set;
 }
 
-char *http_get_header(struct hashset *set, const char *name, int name_len,
-                      int *value_len) {
+extern inline void reset_header_hashset(struct header_hashset *set) {
+    memset(set->arr, 0, arr_size);
+    set->value_storage_ptr = set->value_storage;
+}
+
+extern inline void free_header_hashset(struct header_hashset *set) {
+    free(set->arr);
+    free(set);
+}
+
+char *http_get_header(struct header_hashset *set, const char *name,
+                      int name_len, int *value_len) {
     if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
 
         unsigned int key = http_hash_header(name, name_len);
@@ -408,7 +422,7 @@ char *http_get_header(struct hashset *set, const char *name, int name_len,
     return NULL; // invalid header
 }
 
-int http_set_header(struct hashset *set, const char *name, int name_len,
+int http_set_header(struct header_hashset *set, const char *name, int name_len,
                     const char *value, int value_len) {
     if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
 

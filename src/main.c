@@ -47,14 +47,15 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg);
  * data and closes the connection. Signature matches the required signature
  * for callback function in documentation of `event_new()`.
  */
-void recv_cb(evutil_socket_t, short, void *);
-void close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
-int  recv_data(evutil_socket_t sockfd, struct client_data *con_data);
-int  http_respond(struct client_data *con_data, http_res *response);
-void http_respond_fallback(struct client_data *con_data,
-                           http_status_code status_code, int http_res_flags);
-int  reset_con_data(struct client_data *con_data);
-int  terminate_connection(struct client_data *con_data);
+void        recv_cb(evutil_socket_t, short, void *);
+void        close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
+int         recv_data(evutil_socket_t sockfd, struct client_data *con_data);
+int         http_respond(struct client_data *con_data, http_res *response);
+void        http_respond_fallback(struct client_data *con_data,
+                                  http_status_code status_code, int http_res_flags);
+int         reset_con_data(struct client_data *con_data);
+static void reset_http_req(http_req *request);
+int         terminate_connection(struct client_data *con_data);
 struct client_data *init_client_data(struct event_data *ev_data);
 int                 close_connection(struct client_data *con_data);
 
@@ -430,14 +431,14 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
         // do_GET(con_data); // TODO
         http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
         terminate_connection(con_data);
-        return;
     } else {
         // TODO: there are separate codes for method not allowed and method not
         // supported?
         http_respond_fallback(con_data, Method_Not_Allowed, CLOSE_CON);
         terminate_connection(con_data);
-        return;
     }
+
+    reset_http_req(con_data->request);
 
     /* finished processing a single request. */
 }
@@ -874,6 +875,17 @@ struct client_data *init_client_data(struct event_data *event) {
     return con_data;
 }
 
+static inline void reset_http_req(http_req *request) {
+    struct header_hashset *headers     = request->headers;
+    char                  *message_buf = request->message;
+
+    reset_header_hashset(headers);
+    memset(request, 0, sizeof(*request));
+
+    request->headers = headers;
+    request->message = message_buf;
+}
+
 int reset_con_data(struct client_data *con_data) {
     int                 request_buffer_capacity = INIT_BUFFER_SIZE;
     struct event_data  *event                   = con_data->event;
@@ -901,10 +913,12 @@ int reset_con_data(struct client_data *con_data) {
 
 int finished_receiving(struct client_data *con_data) {
     struct recv_buffer *recv_buf = con_data->recv_buf;
+    http_req           *request  = con_data->request;
 
     catchExcp(recv_buf == NULL || recv_buf->buffer == NULL,
               "finished_receiving: critical error, no recv_buf found\n", 1);
 
+    free_header_hashset(request->headers);
     free(recv_buf->buffer);
     free(recv_buf);
     return 0;
@@ -1032,10 +1046,10 @@ int http_parse_request(struct client_data *con_data,
     ev_ssize_t *bytes_parsed  = &con_data->recv_buf->bytes_parsed;
     /* phr_parse_request returns the *total* length of the HTTP request line +
      * headers for each call, so for each iteration use = instead of += */
-    *bytes_parsed = phr_parse_request(
-        buffer, buffer_len, &request->method, &request->method_len,
-        &request->path, &request->path_len, &request->minor_ver,
-        request->headers, &request->num_headers, *bytes_parsed);
+    *bytes_parsed = phr_parse_request(buffer, buffer_len, &request->method,
+                                      &request->method_len, &request->path,
+                                      &request->path_len, &request->minor_ver,
+                                      header_arr, num_headers, *bytes_parsed);
 
     /* TODO circular recv: continue parsing request from buffer start if buffer
     end was reached */

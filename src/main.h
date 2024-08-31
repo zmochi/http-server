@@ -65,12 +65,14 @@ struct event_data { // TODO: change name to client_ev_data
 };
 
 typedef struct {
-    const char     *method, *path;
-    size_t          method_len, path_len, num_headers;
-    int             minor_ver;
-    struct hashset *headers;
-    size_t          message_length;
-    char           *message;
+    const char *method, *path;
+    size_t      method_len, path_len, num_headers;
+    int         minor_ver;
+    /* hashset of headers of HTTP req, each headers value is copied into a
+     * buffer inside this struct and is indepedent of the recv buffer */
+    struct header_hashset *headers;
+    size_t                 message_length;
+    char                  *message;
 } http_req;
 
 struct send_buffer {

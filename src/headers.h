@@ -28,7 +28,7 @@ struct header_value {
 };
 
 /* a hashset to be used as a blackbox with the function defined in headers.h */
-struct hashset {
+struct header_hashset {
     /* a buffer containing all header values, pointed to by elements in @arr */
     char value_storage[REQ_HEADER_VALUES_MAX_SIZE];
     /* an array containing pointers to the value of each header. the value is
@@ -38,10 +38,12 @@ struct hashset {
     char *value_storage_ptr;
 };
 
-struct hashset *malloc_init_hashset(void);
-char *http_get_header(struct hashset *set, const char *name, int name_len,
-                      int *value_ptr);
-int   http_set_header(struct hashset *set, const char *name, int name_len,
-                      const char *value, int value_len);
+struct header_hashset *malloc_init_hashset(void);
+void                   reset_header_hashset(struct header_hashset *set);
+void                   free_header_hashset(struct header_hashset *set);
+char *http_get_header(struct header_hashset *set, const char *name,
+                      int name_len, int *value_ptr);
+int http_set_header(struct header_hashset *set, const char *name, int name_len,
+                    const char *value, int value_len);
 
 #endif /* __HEADERS_H */

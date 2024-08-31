@@ -76,8 +76,8 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     return ret;
 }
 
-int populate_headers_map(struct hashset *set, struct phr_header headers[],
-                         size_t num_headers) {
+int populate_headers_map(struct header_hashset *set,
+                         struct phr_header headers[], size_t num_headers) {
 
     for ( int i = 0; i < num_headers; i++ ) {
         struct phr_header header = headers[i];
@@ -87,7 +87,7 @@ int populate_headers_map(struct hashset *set, struct phr_header headers[],
     return 0;
 }
 
-int http_extract_validate_header(struct hashset *set,
+int http_extract_validate_header(struct header_hashset *set,
                                  const char *restrict header_name,
                                  size_t header_name_len,
                                  const char *restrict expected_value,
@@ -112,9 +112,9 @@ int http_extract_validate_header(struct hashset *set,
     return header_flags;
 }
 
-int http_extract_content_length(struct hashset *set,
-                                size_t         *content_length_storage,
-                                size_t          max_content_length) {
+int http_extract_content_length(struct header_hashset *set,
+                                size_t                *content_length_storage,
+                                size_t                 max_content_length) {
 
     short header_flags = 0;
     int   content_len_strlen;

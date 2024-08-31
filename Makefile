@@ -12,15 +12,18 @@ H_DIR = src
 O_DIR = obj
 LIB_DIR = libs
 
-DEPS = headers main http_utils status_codes
 EXECUTABLE_NAME = ./start_server
 MAIN_NAME = config.c
 MAKE = make
 CC = clang
 
-HDEPS = $(patsubst %,$(H_DIR)/%.h,$(DEPS))
-CDEPS = $(patsubst %,$(SRC_DIR)/%.c,$(DEPS))
-OBJ = $(patsubst %,$(O_DIR)/%.o,$(DEPS))
+# header file names with path relative to $(H_DIR)
+_HDEPS = headers.h main.h http_utils.h status_codes.h
+# c file names with path relative to $(SRC_DIR)
+_CDEPS = headers.c main.c http_utils.c status_codes.c http_limits.c
+HDEPS = $(patsubst %.h,$(H_DIR)/%.h,$(_HDEPS))
+CDEPS = $(patsubst %.c,$(SRC_DIR)/%.c,$(_CDEPS))
+OBJ = $(patsubst %.c,$(O_DIR)/%.o,$(_CDEPS))
 
 
 main: OPT += -O3
@@ -32,11 +35,13 @@ debug: all LIBS
 all: $(SHARED_LIB_FILES) $(OBJ) $(MAIN_NAME) 
 	$(CC) $(CFLAGS) -o $(EXECUTABLE_NAME) $(OBJ) $(MAIN_NAME)
 
-$(O_DIR)/%.o: $(SRC_DIR)/%.c $(HDEPS) # include all header dependencies since C files each include multiple .h files
+$(O_DIR)/%.o: $(SRC_DIR)/%.c $(H_DIR) # include all header dependencies since C files each include multiple .h files
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(MAIN_NAME): $(CDEPS) $(HDEPS)
 
+test: all LIBS
+	$(CC) $(CFLAGS) -g -o unit_tests $(OBJ) unit_tests.c
 
 $(LIB_DIR)/%.a: LIBS
 	$(MAKE) -C libs

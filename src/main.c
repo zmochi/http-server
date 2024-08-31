@@ -35,8 +35,11 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg);
  *
  * After the connection is established (via `accept()` and the accept_cb()
  * callback function), the client may send data. This function receives the
- * data and closes the connection. Signature matches the required signature
- * for callback function in documentation of `event_new()`.
+ * data and calls the function that handles the HTTP request's method. Signature
+ * matches the required signature for callback function in documentation of
+ * `event_new()`.
+ */
+void recv_cb(evutil_socket_t, short, void *);
 
 /**
  * @brief Receives pending data in @sockfd into the recv buffer in @con_data
@@ -49,6 +52,18 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg);
  * packet)
  */
 int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
+/**
+ * @brief Callback function that handles closing connections
+ *
+ * This callback is either triggered manually via libevent's API
+ * (event_active()) or triggered automatically when the connection times out.
+ * If triggered manually, closes connection only once all queued data was sent.
+ * If timed out, discards all data to be sent and closes the connection.
+ *
+ * @param sockfd socket of connection
+ * @param flags libevent flags
+ * @param arg struct client_data of connection
+ */
 void        close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
 int         http_respond(struct client_data *con_data, http_res *response);
 void        http_respond_fallback(struct client_data *con_data,

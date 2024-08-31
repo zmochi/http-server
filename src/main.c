@@ -535,15 +535,16 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
 }
 
 /**
- * @brief copies a linked list of headers and formats them into a buffer
+ * @brief copies and formats an array of headers into a buffer
  *
- * @param headers list of headers
+ * @param headers array of headers
+ * @param num_headers number of elements in headers array
  * @param buffer buffer to copy formatted headers to
  * @param capacity buffer capacity
  * @return number of bytes written on success, -1 if capacity is too small
  */
-ev_ssize_t copy_headers_to_buf(struct http_header *headers, char *buffer,
-                               size_t capacity) {
+ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
+                               char *buffer, size_t capacity) {
     const int NO_MEM_ERR    = -1;
     size_t    bytes_written = 0;
     /* the buffer start point and buffer capacity change while writing to the
@@ -555,13 +556,15 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, char *buffer,
 
     static const char *HEADER_FMT = "%s: %s\r\n";
 
-    for ( struct http_header *header = headers; header != NULL;
-          header                     = header->next ) {
-        eff_bufcap = capacity - bytes_written;
-        eff_buf    = buffer + bytes_written;
+    for ( size_t i = 0; i < num_headers; i++ ) {
+        struct http_header header = headers[i];
+        eff_bufcap                = capacity - bytes_written;
+        eff_buf                   = buffer + bytes_written;
 
-        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header->header_name,
-                       header->header_value);
+        /* snprintf should be fine since HTTP standard disallows null bytes in
+         * header values */
+        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header.header_name,
+                       header.header_value);
 
         if ( ret > eff_bufcap ) { // out of memory, capacity too small
             return NO_MEM_ERR;
@@ -636,8 +639,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     // copy headers to send buffer:
     ret = -1;
-    while ( ret < 0 && response->first_header != NULL ) {
-        ret = copy_headers_to_buf(response->first_header,
+    while ( ret < 0 && response->headers_arr != NULL ) {
+        ret = copy_headers_to_buf(response->headers_arr, response->num_headers,
                                   new_send_buf->buffer + bytes_written,
                                   new_send_buf->capacity - bytes_written);
 
@@ -723,15 +726,13 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
 static inline void http_header_init(struct http_header *header,
                                     const char         *header_name,
-                                    const char         *header_value,
-                                    struct http_header *next) {
+                                    const char         *header_value) {
     header->header_name  = header_name;
     header->header_value = header_value;
-    header->next         = next;
 }
 
 static inline void http_free_response_headers(http_res *response) {
-    struct http_header *next, *header = response->first_header;
+    struct http_header *next, *header = response->headers_arr;
 
     while ( header != NULL ) {
         next = header->next;
@@ -834,10 +835,11 @@ void http_respond_fallback(struct client_data *con_data,
     struct http_header *content_len_header = &headers[0],
                        *connection_header  = &headers[1];
 
-    response.status_code  = status_code;
-    response.message      = file_contents_buf;
-    response.message_len  = content_len;
-    response.first_header = headers;
+    response.status_code = status_code;
+    response.message     = file_contents_buf;
+    response.message_len = content_len;
+    response.headers_arr = headers;
+    response.num_headers = ARR_SIZE(headers);
 
     /* stringify number of bytes to be sent in message content, +1 to make space
      * for null byte */
@@ -846,13 +848,12 @@ void http_respond_fallback(struct client_data *con_data,
         num_to_str(content_len_value, ARR_SIZE(content_len_value), content_len);
     if ( ret < 0 ) LOG_ERR("snprintf: error in writing Content-Length header");
 
-    http_header_init(content_len_header, "Content-Length", content_len_value,
-                     connection_header);
+    http_header_init(content_len_header, "Content-Length", content_len_value);
 
     if ( http_res_flags & SERV_CON_CLOSE ) {
-        http_header_init(connection_header, "Connection", "close", NULL);
+        http_header_init(connection_header, "Connection", "close");
     } else {
-        http_header_init(connection_header, "Connection", "keep-alive", NULL);
+        http_header_init(connection_header, "Connection", "keep-alive");
     }
 
     /* http_respond formats everything into a single message and allocates

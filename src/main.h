@@ -91,9 +91,10 @@ struct client_data {
 
 typedef struct {
     http_status_code    status_code;
-    const char         *message;      /* HTTP response content */
+    const char         *message;     /* HTTP response content */
     size_t              message_len;
-    struct http_header *first_header; /* linked list of headers */
+    struct http_header *headers_arr; /* linked list of headers */
+    size_t              num_headers;
 } http_res;
 
 typedef struct {

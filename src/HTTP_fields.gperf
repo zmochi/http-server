@@ -1,17 +1,14 @@
-// if any of the names defined below are changed, make sure to update the function at the bottom
+// if any of the names defined below are changed, make sure to update the functions at the bottom
 %{
 #include "headers.h"
 %}
 %compare-strncmp 
-%global_table
+%global-table
 %define initializer-suffix ,NULL
 %define word-array-name http_headerlist
 %define length-table-name http_header_lengthtable
 %define hash-function-name http_hash_header
-%define lookup-function-name http_get_header
-struct hash_header { char *name; struct phr_header *req_header; };
-int http_set_header(const char *name, size_t name_len,
-                    struct phr_header *req_header);
+%define lookup-function-name http_lookup_header
 %%
 A-IM
 Accept
@@ -181,17 +178,62 @@ WWW-Authenticate
 X-Content-Type-Options
 X-Frame-Options
 %%
-int http_set_header(const char *name, size_t name_len,
-                    struct phr_header *req_header) {
+const size_t arr_len  = MAX_HASH_VALUE;
+const size_t arr_size = arr_len * sizeof(struct header_value);
+
+extern inline struct header_hashset *malloc_init_hashset(void) {
+    /* just an array of struct http_header*, the index for a header string @str
+     * is given by http_hash_header(str, strlen(str)) */
+    struct header_hashset *set = malloc(sizeof(struct header_hashset));
+    set->arr                   = malloc(arr_size);
+    memset(set->arr, 0, arr_size);
+    /* TODO: can initialize in O(1) */
+    set->value_storage_ptr = set->value_storage;
+    /* TODO: check malloc() fail */
+
+    return set;
+}
+
+extern inline void reset_header_hashset(struct header_hashset *set) {
+    memset(set->arr, 0, arr_size);
+    set->value_storage_ptr = set->value_storage;
+}
+
+extern inline void free_header_hashset(struct header_hashset *set) {
+    free(set->arr);
+    free(set);
+}
+
+char *http_get_header(struct header_hashset *set, const char *name,
+                      int name_len, int *value_len) {
     if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
 
         unsigned int key = http_hash_header(name, name_len);
 
         if ( key <= MAX_HASH_VALUE ) {
-
-            http_headerlist[key].req_header = req_header;
-            return 0; // success
+            *value_len = set->arr[key].value_len;
+            return set->arr[key].value; // success
         }
     }
-    return 1; // Invalid header
+    return NULL; // invalid header
+}
+
+int http_set_header(struct header_hashset *set, const char *name, int name_len,
+                    const char *value, int value_len) {
+    if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
+
+        unsigned int key = http_hash_header(name, name_len);
+
+        if ( key <= MAX_HASH_VALUE ) {
+            memcpy(set->value_storage_ptr, value, value_len);
+
+            set->arr[key].value     = set->value_storage_ptr;
+            set->arr[key].value_len = value_len;
+
+            set->value_storage_ptr += value_len;
+
+            return true; // success
+        }
+    }
+    return false; // invalid header name
 }

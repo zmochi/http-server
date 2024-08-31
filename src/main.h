@@ -1,3 +1,4 @@
+#include "headers.h"
 #include "status_codes.h"
 #ifdef _WIN32
 #include <winsock.h>
@@ -59,10 +60,12 @@ typedef struct {
     /* pointers to the method and path in original client recv buf */
     const char *method, *path;
     /* lengths of method and path strings above */
-    size_t            method_len, path_len;
-    size_t            num_headers;
-    int               minor_ver;
-    struct phr_header headers[MAX_NUM_HEADERS];
+    size_t method_len, path_len;
+    size_t num_headers;
+    int    minor_ver;
+    /* hashset of headers of HTTP req, each headers value is copied into a
+     * buffer inside this struct and is indepedent of the recv buffer */
+    struct header_hashset *headers;
     /* points to content of HTTP req from client */
     char  *message;
     size_t message_length;
@@ -91,14 +94,6 @@ struct client_data {
     bool                close_connection;
     int (*append_response)(struct client_data *con_data,
                            struct send_buffer *response);
-};
-
-/* linked list of HTTP headers, embedded in http_res */
-struct http_header {
-    const char         *header_name;
-    const char         *header_value;
-    uint16_t            header_len;
-    struct http_header *next;
 };
 
 typedef struct {

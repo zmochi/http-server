@@ -510,7 +510,6 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
     if ( nbytes == SOCKET_ERROR ) {
         switch ( EVUTIL_SOCKET_ERROR() ) {
             case ECONNRESET:
-                LOG("Connection reset by client");
                 return CON_RESET;
 
             case EWOULDBLOCK:
@@ -519,7 +518,6 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
 #if EWOULDBLOCK != EAGAIN
             case EAGAIN:
 #endif
-                LOG_ERR("No data to receive");
                 return RECV_NODATA;
 
             default:

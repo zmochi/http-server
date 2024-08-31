@@ -190,13 +190,14 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
  */
 void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     LOG();
-    struct client_data *con_data               = (struct client_data *)arg;
-    struct recv_buffer *recv_buf               = con_data->recv_buf;
-    struct send_buffer *send_buf               = con_data->send_buf;
-    bool                timed_out              = flags & EV_TIMEOUT;
-    bool                server_close_requested = flags & SERV_CON_CLOSE;
-    bool                client_closed_con      = flags & CLIENT_CON_CLOSE;
-    bool                unsent_data_exists     = !(con_data->send_buf == NULL);
+    struct client_data *con_data = (struct client_data *)arg;
+    struct recv_buffer *recv_buf = con_data->recv_buf;
+    struct send_buffer *send_buf = con_data->send_buf;
+
+    bool timed_out              = flags & EV_TIMEOUT;
+    bool server_close_requested = flags & SERV_CON_CLOSE;
+    bool client_closed_con      = flags & CLIENT_CON_CLOSE;
+    bool unsent_data_exists     = !(con_data->send_buf == NULL);
 
     if ( timed_out ) LOG("timed_out");
     if ( close_requested ) LOG("close_request");
@@ -205,7 +206,7 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
      * connection didn't timeout */
     if ( !(server_close_requested || client_closed_con || timed_out) ) return;
 
-    /* if unsent data exists, send it and don't close connection
+    /* if unsent data exists, send it and don't close connection.
      * if connection timed out/client closed connection, continue (discard
      * unsent data) */
     if ( unsent_data_exists && !timed_out && !client_closed_con ) {
@@ -796,6 +797,12 @@ void http_respond_fallback(struct client_data *con_data,
 
     content_len    = 0;
     FILE *msg_file = fopen(message_filepath, "r");
+    if ( !msg_file ) {
+        LOG_ERR("attempted to open %s. fopen: %s", message_filepath,
+                strerror(errno));
+        exit(1);
+    }
+
     while ( (ret = load_file_to_buf(msg_file, file_contents_buf,
                                     send_buffer_capacity, &content_len)) >=
             0 ) {

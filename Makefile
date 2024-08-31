@@ -36,6 +36,7 @@ all: $(SHARED_LIB_FILES) $(OBJ) $(MAIN_NAME)
 	$(CC) $(CFLAGS) -o $(EXECUTABLE_NAME) $(OBJ) $(MAIN_NAME)
 
 $(O_DIR)/%.o: $(SRC_DIR)/%.c $(H_DIR) # include all header dependencies since C files each include multiple .h files
+	mkdir -p obj
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(MAIN_NAME): $(CDEPS) $(HDEPS)

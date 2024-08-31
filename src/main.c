@@ -190,7 +190,9 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
         return;
     }
     /* free recv buffer if not free'd already */
-    if ( recv_buf != NULL ) finished_receiving(con_data);
+    if ( recv_buf == NULL )
+        LOG_ERR("critical: recv_buf is NULL when connection is closed");
+    finished_receiving(con_data);
     /* free send buffers (and discard data to be sent) if connection timed out
      */
     // TODO: refactor because this code doesn't make sense and decide whether,

@@ -50,8 +50,8 @@ int         handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
                                 ev_ssize_t new_size);
 const char *stringify_statuscode(http_status_code status_code);
 bool        is_integer(const char str[], int str_len);
-extern inline ev_ssize_t num_to_str(char *str, size_t strcap, size_t num);
-int                      strftime_gmtformat(char *buf, size_t buflen);
-void catchExcp(int condition, const char *err_msg, int action);
+ev_ssize_t  num_to_str(char *str, size_t strcap, size_t num);
+int         strftime_gmtformat(char *buf, size_t buflen);
+void        catchExcp(int condition, const char *err_msg, int action);
 
 #endif /* __HTTP_UTILS_H */

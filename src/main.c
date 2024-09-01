@@ -490,13 +490,6 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
 int terminate_connection(struct client_data *con_data) {
 
-    // int header_flags = http_extract_validate_header(
-    //     "Connection", strlen("Connection"), "close", strlen("close"));
-    // if ( header_flags & HEADER_VALUE_VALID ) {
-    //     con_data->close_connection = true;
-    //     close_connection(con_data);
-    // }
-
     event_active(con_data->event->event_close_con, SERV_CON_CLOSE, 0);
 
     return 0;
@@ -683,8 +676,8 @@ void http_respond_fallback(struct client_data *con_data,
                            http_status_code status_code, int http_res_flags) {
     LOG();
     http_res     response;
-    size_t       send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
-    const size_t MAX_FILE_READ_SIZE   = 1 << 27;
+    size_t       init_file_content_cap = INIT_SEND_BUFFER_CAPACITY;
+    const size_t MAX_FILE_READ_SIZE    = 1 << 27;
     char message_filepath[1024]; /* arbitrary size, should be big enough for any
                                    path */
     int status;
@@ -717,15 +710,13 @@ void http_respond_fallback(struct client_data *con_data,
     }
 
     while ( (ret = load_file_to_buf(msg_file, file_contents_buf,
-                                    send_buffer_capacity, &content_len)) >=
+                                    init_file_content_cap, &content_len)) >=
             0 ) {
         /* resize buffer as needed, if file hasn't been fully read */
         status =
-            handler_buf_realloc(&file_contents_buf, &send_buffer_capacity,
-                                MAX_FILE_READ_SIZE, send_buffer_capacity * 2);
+            handler_buf_realloc(&file_contents_buf, &init_file_content_cap,
+                                MAX_FILE_READ_SIZE, init_file_content_cap * 2);
 
-        if ( status == MAX_BUF_SIZE_EXCEEDED )
-            LOG_ERR("file at %s exceeds max read size", message_filepath);
         if ( status == MAX_BUF_SIZE_EXCEEDED ) {
             LOG_ERR("file at %s exceeds max read size, aborting.",
                     message_filepath);
@@ -756,12 +747,13 @@ void http_respond_fallback(struct client_data *con_data,
     response.headers_arr = headers;
     response.num_headers = ARR_SIZE(headers);
 
-    /* stringify number of bytes to be sent in message content, +1 to make space
-     * for null byte */
+    /* stringify number of bytes to be sent in message content, +1 to make
+     * space for null byte */
     char content_len_value[NUM_DIGITS(SIZE_T_MAX) + 1];
     ret =
         num_to_str(content_len_value, ARR_SIZE(content_len_value), content_len);
-    if ( ret < 0 ) LOG_ERR("snprintf: error in writing Content-Length header");
+    if ( ret < 0 )
+        LOG_ERR("num_to_str: error in writing Content-Length header");
 
     http_header_init(content_len_header, "Content-Length", content_len_value);
 
@@ -809,7 +801,8 @@ int append_response(struct client_data *con_data,
 
 /**
  * @brief initalizes the @request struct in struct client_data
- * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure to allocate memory
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure to allocate
+ * memory
  */
 static inline int init_client_request(struct client_data *con_data) {
     con_data->request = calloc(1, sizeof(*con_data->request));

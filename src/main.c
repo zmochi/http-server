@@ -31,11 +31,13 @@ typedef enum {
 #endif
 } con_flags;
 
-struct addrinfo *get_local_addrinfo(const char *port);
-int              local_socket_bind_listen(const char *port);
-
-void accept_cb(evutil_socket_t, short, void *);
-void send_cb(evutil_socket_t sockfd, short flags, void *arg);
+struct addrinfo   *get_local_addrinfo(const char *port);
+int                local_socket_bind_listen(const char *port);
+static void        http_header_init(struct http_header *header,
+                                    const char *header_name, const char *header_value);
+static inline void http_free_response_headers(http_res *response);
+void               accept_cb(evutil_socket_t, short, void *);
+void               send_cb(evutil_socket_t sockfd, short flags, void *arg);
 
 /**
  * @brief Callback function to read data sent from client.
@@ -172,8 +174,10 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
     catchExcp(event_write == NULL, "event_new: couldn't initialize write event",
               1);
 
-    event_close_con = event_new(con_data->event->base, incoming_sockfd,
-                                EV_TIMEOUT, close_con_cb, con_data);
+    /* socket must be -1 in event_new() if flags EV_READ or EV_WRITE are not
+     * present */
+    event_close_con = event_new(con_data->event->base, -1, EV_TIMEOUT,
+                                close_con_cb, con_data);
     catchExcp(event_close_con == NULL,
               "event_new: couldn't initialize close-connection event", 1);
 

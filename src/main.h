@@ -89,12 +89,18 @@ struct client_data {
                            struct send_buffer *response);
 };
 
+enum res_flags {
+    PLACEHOLDER = 1,
+};
+
 typedef struct {
     http_status_code    status_code;
-    const char         *message;     /* HTTP response content */
+    char               *message;     /* HTTP response content */
     size_t              message_len;
     struct http_header *headers_arr; /* linked list of headers */
     size_t              num_headers;
+    /* bit mask of flags */
+    enum res_flags res_flags;
 } http_res;
 
 typedef struct {
@@ -102,6 +108,11 @@ typedef struct {
     char  *PORT;
     char  *SERVNAME;
     time_t timeout;
+    /* generates a reponse to request.
+     *  - must use malloc() to allocate response.headers_arr, response.message
+     *  - must set all fields of http_res
+     */
+    http_res (*handler)(http_req *request);
 } config;
 
 int init_server(config conf);

@@ -477,18 +477,17 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
             exit(EXIT_FAILURE);
     }
 
-    // if-else statements for methods instead of hash/switch statements simply
-    // because there aren't that many methods, performance impact should be
-    // negligible?
-    if ( strncmp(con_data->request->method, "GET",
-                 con_data->request->method_len) == 0 ) {
-        // do_GET(con_data); // TODO
-        http_respond_fallback(con_data, Method_Not_Allowed, SERV_CON_CLOSE);
-        terminate_connection(con_data);
-    } else {
-        http_respond_fallback(con_data, Not_Implemented, SERV_CON_CLOSE);
-        terminate_connection(con_data);
+    http_res response = server_conf.handler(con_data->request);
+
+    if ( response.num_headers > MAX_NUM_HEADERS ) {
+        LOG_ERR("handler returned response with too many headers, aborting.");
+        return;
     }
+
+    http_respond(con_data, &response);
+
+    if ( response.headers_arr != NULL ) free(response.headers_arr);
+    if ( response.message != NULL ) free(response.message);
 
     reset_http_req(con_data->request);
 

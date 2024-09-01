@@ -84,8 +84,6 @@ struct client_data {
     struct queue        send_queue;
     struct recv_buffer *recv_buf;
     http_req           *request;
-    int (*append_response)(struct client_data *con_data,
-                           struct send_buffer *response);
 };
 
 enum res_flags {

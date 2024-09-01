@@ -241,14 +241,14 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
  */
 void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     LOG();
-    struct client_data *con_data = (struct client_data *)arg;
-    struct recv_buffer *recv_buf = con_data->recv_buf;
-    struct send_buffer *send_buf = con_data->send_buf;
+    struct client_data *con_data   = (struct client_data *)arg;
+    struct recv_buffer *recv_buf   = con_data->recv_buf;
+    struct queue       *send_queue = &con_data->send_queue;
 
     bool timed_out              = flags & EV_TIMEOUT;
     bool server_close_requested = flags & SERV_CON_CLOSE;
     bool client_closed_con      = flags & CLIENT_CON_CLOSE;
-    bool unsent_data_exists     = !(con_data->send_buf == NULL);
+    bool unsent_data_exists     = !is_empty(send_queue);
 
     if ( timed_out ) LOG("timed_out");
     if ( unsent_data_exists ) LOG("unsent_data_exis");
@@ -306,7 +306,7 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     struct client_data *con_data = (struct client_data *)arg;
 
-    bool is_send_queue_empty = con_data->send_buf == NULL;
+    bool is_send_queue_empty = is_empty(&con_data->send_queue);
 
     if ( is_send_queue_empty ) {
         /* nothing to send */
@@ -315,7 +315,7 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
     }
 
     /* send pending responses */
-    struct send_buffer send_buf = *(con_data->send_buf);
+    struct send_buffer send_buf = *peek_send_buf(&con_data->send_queue);
     size_t             nbytes = 0, total_bytes = 0;
 
     nbytes = send(sockfd, send_buf.buffer + send_buf.bytes_sent,
@@ -334,7 +334,7 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
         finished_sending(con_data);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
-        con_data->send_buf->bytes_sent += nbytes;
+        peek_send_buf(&con_data->send_queue)->bytes_sent += nbytes;
     } else {
         LOG_ERR("unknown error while sending data");
         exit(1);
@@ -342,28 +342,18 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 }
 
 bool finished_sending(struct client_data *con_data) {
+    if ( is_empty(&con_data->send_queue) ) return true;
 
-    /* if queue is empty */
-    if ( con_data->send_buf == NULL ) return true;
+    struct send_buffer *send_buf = dequeue_send_buf(&con_data->send_queue);
 
-    catchExcp(con_data->send_buf->buffer == NULL,
+    catchExcp(send_buf->buffer == NULL,
               "finished_sending: critical error, no send_buf buffer found\n",
               1);
 
-    struct send_buffer *next = con_data->send_buf->next;
+    free(send_buf->buffer);
+    free(send_buf);
 
-    free(con_data->send_buf->buffer);
-    free(con_data->send_buf);
-    con_data->send_buf = NULL;
-
-    /* if there is another buffer to be queued */
-    if ( next != NULL ) {
-        con_data->send_buf = next;
-        return false;
-    } else {
-        /* queue is empty */
-        return true;
-    }
+    return is_empty(&con_data->send_queue);
 }
 
 int http_handle_incomplete_req(struct client_data *con_data) {
@@ -677,7 +667,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     new_send_buf->actual_len = bytes_written;
 
-    con_data->append_response(con_data, new_send_buf);
+    enqueue_send_buf(&con_data->send_queue, new_send_buf);
 
     return 0;
 }
@@ -816,25 +806,6 @@ void http_respond_fallback(struct client_data *con_data,
     }
 }
 
-int append_response(struct client_data *con_data,
-                    struct send_buffer *response) {
-    size_t send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
-
-    if ( con_data->send_buf == NULL ) {
-        /* send queue empty, make response first */
-        con_data->send_buf = response;
-        con_data->last     = con_data->send_buf;
-    } else {
-        /* append the provided response to the queue of stuff to send */
-        con_data->last->next = response;
-        con_data->last       = response;
-    }
-
-    response->next = NULL;
-
-    return 0;
-}
-
 /**
  * @brief initalizes the @request struct in struct client_data
  * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure to allocate
@@ -882,8 +853,7 @@ struct client_data *init_client_data(struct event_data *event) {
 
     if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
-    con_data->event           = event;
-    con_data->append_response = append_response;
+    con_data->event = event;
 
     return con_data;
 }
@@ -897,31 +867,6 @@ static inline void reset_http_req(http_req *request) {
 
     request->headers = headers;
     request->message = message_buf;
-}
-
-int reset_con_data(struct client_data *con_data) {
-    int                 request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
-    struct event_data  *event                   = con_data->event;
-    http_req           *req_data                = con_data->request;
-    struct send_buffer *send_buf                = con_data->send_buf;
-    struct recv_buffer *recv_buf                = con_data->recv_buf;
-    struct send_buffer *last                    = con_data->last;
-
-    // we prefer to free the data and then call calloc() rather than zero
-    // out existing data since the buffer since may be bigger than the
-    // initial size
-    recv_buf->buffer =
-        realloc(con_data->recv_buf->buffer, request_buffer_capacity);
-    if ( !recv_buf->buffer ) HANDLE_ALLOC_FAIL();
-
-    recv_buf->capacity = request_buffer_capacity;
-
-    memset(con_data, 0, sizeof(*con_data));
-    memset(req_data, 0, sizeof(*req_data));
-    con_data->event   = event;
-    con_data->request = req_data;
-
-    return 0; // success
 }
 
 int finished_receiving(struct client_data *con_data) {

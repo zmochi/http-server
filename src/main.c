@@ -18,14 +18,17 @@ static config server_conf;
 #define DFLT_CLIENT_TIMEOUT_SEC 3
 #define INIT_CLIENT_TIMEOUT     {.tv_sec = CLIENT_TIMEOUT_SEC, .tv_usec = 0}
 
-/* some of these flags are passed to event_active(), they should be negative so
- * they don't accidentally collide with libevent's flags (which are all
- * positive) */
 typedef enum {
-    RECV_NODATA      = -1,
-    CON_RESET        = -2,
-    SERV_CON_CLOSE   = -3,
-    CLIENT_CON_CLOSE = -4,
+    RECV_NODATA      = 1,
+    CON_RESET        = 2,
+    SERV_CON_CLOSE   = 4,
+    CLIENT_CON_CLOSE = 8,
+/* SERV_CON_CLOSE and CLIENT_CON_CLOSE are used in event_active() when signaling
+ * connection close event. the event might get the EV_TIMEOUT flag from libevent
+ * so make sure all flags the event's callback can receive are different: */
+#if EV_TIMEOUT == SERV_CON_CLOSE || EV_TIMEOUT == CLIENT_CON_CLOSE
+#error "critical: EV_TIMEOUT is equal to existing flags"
+#endif
 } con_flags;
 
 struct addrinfo *get_local_addrinfo(const char *port);

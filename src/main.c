@@ -552,6 +552,24 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
     return 0;
 }
 
+struct send_buffer *malloc_init_send_buf(size_t capacity) {
+
+    struct send_buffer *send_buf = calloc(1, sizeof(*send_buf));
+
+    if ( !send_buf ) return NULL;
+
+    send_buf->buffer = malloc(capacity);
+
+    if ( !send_buf->buffer ) {
+        free(send_buf);
+        return NULL;
+    }
+
+    send_buf->capacity = capacity;
+
+    return send_buf;
+}
+
 /**
  * @brief [TODO:description]
  * after this functions returns, it is safe to free all data related to
@@ -563,19 +581,12 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
  */
 int http_respond(struct client_data *con_data, http_res *response) {
     bool message_exists = response->message != NULL;
-    /* the struct send_buffer and associated buffer will be free'd in send_cb */
-    /* TODO: refactor the initialization of a send_buf into a function */
-    struct send_buffer *new_send_buf = calloc(1, sizeof(*new_send_buf));
+    /* the struct send_buffer and associated buffer will be free'd in send_cb.
+     * INIT_SEND_BUFFER_CAPACITY must be big enough for HTTP_RESPONSE_BASE_FMT
+     * after its been formatted. */
+    struct send_buffer *new_send_buf =
+        malloc_init_send_buf(INIT_SEND_BUFFER_CAPACITY);
     if ( !new_send_buf ) HANDLE_ALLOC_FAIL();
-    new_send_buf->buffer = malloc(INIT_SEND_BUFFER_CAPACITY);
-    if ( !new_send_buf->buffer ) {
-        free(new_send_buf);
-        HANDLE_ALLOC_FAIL();
-    }
-
-    /* INIT_SEND_BUFFER_CAPACITY must be big enough for HTTP_RESPONSE_BASE_FMT
-     * after its been formatted */
-    new_send_buf->capacity = INIT_SEND_BUFFER_CAPACITY;
 
     char       date[128]; // temporary buffer to pass date string
     int        status_code = response->status_code;

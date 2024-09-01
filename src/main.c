@@ -5,6 +5,9 @@
 #include "parser.h"
 #include "status_codes.h"
 
+/* libevent: */
+#include <event2/event.h>
+
 /* internal libs: */
 #include "../libs/picohttpparser/picohttpparser.h"
 
@@ -87,6 +90,16 @@ struct client_data *init_client_data(struct event_data *ev_data);
 bool finished_sending(struct client_data *con_data);
 int  finished_receiving(struct client_data *con_data);
 
+bool is_conf_valid(config conf) {
+    bool handler_exists;
+    bool timeout_valid;
+
+    handler_exists = conf.handler != NULL;
+    timeout_valid  = conf.timeout > 0;
+
+    return handler_exists & timeout_valid;
+}
+
 int init_server(config conf) {
     struct event_base *base;
     evutil_socket_t    main_sockfd;
@@ -94,7 +107,12 @@ int init_server(config conf) {
     struct event      *event_accept;
     struct event      *event_write;
 
-    server_conf      = conf;
+    server_conf = conf;
+    if ( !is_conf_valid(conf) ) {
+        LOG_ERR("server configuration invalid");
+        exit(1);
+    }
+
     int conf_timeout = conf.timeout;
 
     if ( conf_timeout == 0 ) conf_timeout = DFLT_CLIENT_TIMEOUT_SEC;

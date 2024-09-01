@@ -1,3 +1,4 @@
+
 #include "main.h"
 #include "headers.h"
 #include "http_limits.h"
@@ -170,7 +171,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_data) {
 
     if ( incoming_sockfd ==
          EVUTIL_INVALID_SOCKET ) { // TODO: make this work with catchExcp
-        fprintf(stderr, "accept: %s",
+        LOG_ERR("accept: %s",
                 evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
         exit(1);
     }
@@ -310,14 +311,10 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
                   send_buf.actual_len - send_buf.bytes_sent, 0);
 
     if ( nbytes == SOCKET_ERROR ) { // TODO: better error handling
-        fprintf(stderr, "send: %s\n",
+        LOG_ERR("send: %s\n",
                 evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
         exit(1);
-    }
-
-    LOG("sent!");
-
-    if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
+    } else if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
         /* all data sent, get next send buffer in the queue. */
         finished_sending(con_data);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
@@ -327,6 +324,8 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
         LOG_ERR("unknown error while sending data");
         exit(1);
     }
+
+    LOG("sent!");
 }
 
 bool finished_sending(struct client_data *con_data) {

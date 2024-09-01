@@ -693,9 +693,9 @@ void http_respond_fallback(struct client_data *con_data,
     size_t     content_len;
 
     /* this buffer should be dynamically allocated since it might need to be
-     * resized, if file contents are too big. will be free'd in send_cb, after
-     * sending its contents */
-    char *file_contents_buf = malloc(send_buffer_capacity);
+     * resized, if file contents are too big.
+     * will be free'd after calling http_respond inside this function */
+    char *file_contents_buf = malloc(init_file_content_cap);
     if ( !file_contents_buf ) HANDLE_ALLOC_FAIL();
 
     /* create path string of HTTP response with provided status code */
@@ -726,6 +726,12 @@ void http_respond_fallback(struct client_data *con_data,
 
         if ( status == MAX_BUF_SIZE_EXCEEDED )
             LOG_ERR("file at %s exceeds max read size", message_filepath);
+        if ( status == MAX_BUF_SIZE_EXCEEDED ) {
+            LOG_ERR("file at %s exceeds max read size, aborting.",
+                    message_filepath);
+            free(file_contents_buf);
+            return;
+        }
     }
 
     if ( ret == -1 && fclose(msg_file) != 0 ) {
@@ -768,7 +774,18 @@ void http_respond_fallback(struct client_data *con_data,
     /* http_respond formats everything into a single message and allocates
      * memory for it. when http_respond returns, all memory allocated to
      * @response can be free'd */
-    http_respond(con_data, &response);
+    status = http_respond(con_data, &response);
+
+    free(file_contents_buf);
+
+    switch ( status ) {
+        /* if response exceeds max send buffer size: */
+        case MAX_BUF_SIZE_EXCEEDED:
+            LOG_ERR("response with status code %d exceeds maximum buffer "
+                    "size. aborting response.",
+                    status_code);
+            return;
+    }
 }
 
 int append_response(struct client_data *con_data,

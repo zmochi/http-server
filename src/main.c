@@ -215,9 +215,12 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
     if ( timed_out ) LOG("timed_out");
     if ( unsent_data_exists ) LOG("unsent_data_exis");
-    /* don't close connection if close wasn't requested or
-     * connection didn't timeout */
-    if ( !(server_close_requested || client_closed_con || timed_out) ) return;
+    /* failsafe: don't close connection if close wasn't requested, client didn't
+     * close connection or connection didn't timeout */
+    if ( !(server_close_requested || client_closed_con || timed_out) ) {
+        LOG_ERR("callback triggered when it shouldn't have");
+        return;
+    }
 
     /* if unsent data exists, send it and don't close connection.
      * if connection timed out/client closed connection, continue (discard
@@ -228,23 +231,17 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     }
 
     LOG("closing connection");
-    /* free recv buffer if not free'd already */
+
     if ( recv_buf == NULL )
         LOG_ERR("critical: recv_buf is NULL when connection is closed");
     finished_receiving(con_data);
-    /* free send buffers (and discard data to be sent) if connection timed out
-     */
-    // TODO: refactor because this code doesn't make sense and decide whether,
-    // on timeout, should remaining responses be sent or discarded */
-    if ( send_buf != NULL )
-        // if ( timed_out )
-        /* each call to finished_sending frees the next buffer in queue of
-         * responses to be sent, when `true` is returned, there is nothing
-         * more to free */
-        while ( !finished_sending(con_data) )
-            ;
 
-    // TODO: close connection
+    /* discard queued data to be sent: each call to finished_sending frees the
+     * next buffer in queue of responses to be sent, when `true` is returned,
+     * there is nothing more to free */
+    while ( !finished_sending(con_data) )
+        ;
+
     event_free(con_data->event->event_write);
     event_free(con_data->event->event_read);
     event_free(con_data->event->event_close_con);
@@ -309,8 +306,12 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
 bool finished_sending(struct client_data *con_data) {
 
-    catchExcp(con_data->send_buf == NULL || con_data->send_buf->buffer == NULL,
-              "finished_sending: critical error, no send_buf found\n", 1);
+    /* if queue is empty */
+    if ( con_data->send_buf == NULL ) return true;
+
+    catchExcp(con_data->send_buf->buffer == NULL,
+              "finished_sending: critical error, no send_buf buffer found\n",
+              1);
 
     struct send_buffer *next = con_data->send_buf->next;
 
@@ -323,6 +324,7 @@ bool finished_sending(struct client_data *con_data) {
         con_data->send_buf = next;
         return false;
     } else {
+        /* queue is empty */
         return true;
     }
 }

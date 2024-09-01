@@ -3,6 +3,7 @@
 #include "http_limits.h"
 #include "http_utils.h"
 #include "parser.h"
+#include "queue.h"
 #include "status_codes.h"
 
 /* libevent: */
@@ -33,6 +34,17 @@ typedef enum {
 #error "critical: EV_TIMEOUT is equal to existing flags"
 #endif
 } con_flags;
+
+static inline struct send_buffer *dequeue_send_buf(struct queue *queue) {
+    return list_entry(dequeue(queue), struct send_buffer, entry);
+}
+static inline void enqueue_send_buf(struct queue       *queue,
+                                    struct send_buffer *send_buf) {
+    enqueue(queue, &send_buf->entry);
+}
+static inline struct send_buffer *peek_send_buf(struct queue *queue) {
+    return list_entry(queue->head, struct send_buffer, entry);
+}
 
 struct addrinfo   *get_local_addrinfo(const char *port);
 int                local_socket_bind_listen(const char *port);

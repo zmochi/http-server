@@ -545,6 +545,7 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
  * @return [TODO:return]
  */
 int http_respond(struct client_data *con_data, http_res *response) {
+    bool message_exists = response->message != NULL;
     /* the struct send_buffer and associated buffer will be free'd in send_cb */
     /* TODO: refactor the initialization of a send_buf into a function */
     struct send_buffer *new_send_buf = calloc(1, sizeof(*new_send_buf));
@@ -655,8 +656,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
         }
     } */
 
-    /* append HTTP message content if exists */
-    if ( response->message != NULL ) {
+    /* append HTTP message */
+    if ( message_exists ) {
         if ( response->message_len > new_send_buf->capacity - bytes_written ) {
             // TODO: realloc buffer
             LOG_ERR("reached unimplemented code");

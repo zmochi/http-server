@@ -18,14 +18,18 @@ static inline struct list_item *dequeue(struct queue *queue) {
     queue->head                      = queue->head->prev;
     list_rm(dequeued_entry);
 
+    if ( queue->head == dequeued_entry ) queue->head = NULL;
+
     return dequeued_entry;
 }
 
 static inline void enqueue(struct queue *queue, struct list_item *new) {
-    if ( is_empty(queue) )
+    if ( is_empty(queue) ) {
+        init_entry(new);
         queue->head = new;
-    else
+    } else {
         list_add_head(new, queue->head);
+    }
 }
 
 static inline struct list_item *peek(struct queue *queue) {

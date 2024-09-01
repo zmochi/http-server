@@ -10,6 +10,11 @@ struct list_item {
 #define list_entry(item_ptr, container_type, container_member)                 \
     container_of(item_ptr, container_type, container_member)
 
+static inline void init_entry(struct list_item *entry) {
+    entry->prev = entry;
+    entry->next = entry;
+}
+
 /**
  * @brief Inserts a list item between two other list items
  *

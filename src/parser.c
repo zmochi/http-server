@@ -1,21 +1,61 @@
 #include "http_utils.h"
+/* for struct client_data, enum http_method, enum http_header_props */
+#include "main.h"
+
+/* for struct phr_header */
+#include "../libs/picohttpparser/picohttpparser.h"
 
 #include <stdlib.h>
 #include <string.h>
 
+struct method_str_code {
+    const char      *method_str;
+    size_t           method_strlen;
+    enum http_method method_code;
+};
+
+/* macro must match the name format in `enum http_method` */
+#define structify_method(method_name)                                          \
+    {#method_name, strlen(#method_name), M_##method_name}
+
+static struct method_str_code methods_strings[] = {
+    structify_method(GET),     structify_method(HEAD),
+    structify_method(POST),    structify_method(PUT),
+    structify_method(DELETE),  structify_method(CONNECT),
+    structify_method(OPTIONS), structify_method(TRACE),
+};
+
+enum http_method get_method_code(const char *method) {
+    struct method_str_code known_method;
+    size_t                 num_methods = ARR_SIZE(methods_strings);
+
+    for ( int i = 0; i < num_methods; i++ ) {
+        known_method = methods_strings[i];
+
+        if ( strncmp(method, known_method.method_str,
+                     known_method.method_strlen) == 0 )
+            return known_method.method_code;
+    }
+
+    return UNKNOWN;
+}
+
 int http_parse_request(struct client_data *con_data,
                        struct phr_header header_arr[], size_t *num_headers) {
-    char       *buffer        = con_data->recv_buf->buffer;
+    char       *buffer = con_data->recv_buf->buffer;
+    const char *method;
     size_t      buffer_len    = con_data->recv_buf->capacity;
     http_req   *request       = con_data->request;
     ev_ssize_t *byte_received = &con_data->recv_buf->bytes_received;
     ev_ssize_t *bytes_parsed  = &con_data->recv_buf->bytes_parsed;
     /* phr_parse_request returns the *total* length of the HTTP request line +
      * headers for each call, so for each iteration use = instead of += */
-    *bytes_parsed = phr_parse_request(buffer, buffer_len, &request->method,
+    *bytes_parsed = phr_parse_request(buffer, buffer_len, &method,
                                       &request->method_len, &request->path,
                                       &request->path_len, &request->minor_ver,
                                       header_arr, num_headers, *bytes_parsed);
+
+    request->method = get_method_code(method);
 
     /* TODO circular recv: continue parsing request from buffer start if buffer
     end was reached */

@@ -50,9 +50,22 @@ struct event_data { // TODO: change name to client_ev_data
     void              *event_close_con;
 };
 
+enum http_method {
+    M_GET,
+    M_HEAD,
+    M_POST,
+    M_PUT,
+    M_DELETE,
+    M_CONNECT,
+    M_OPTIONS,
+    M_TRACE,
+    UNKNOWN,
+};
+
 typedef struct {
     /* pointers to the method and path in original client recv buf */
-    const char *method, *path;
+    const char      *path;
+    enum http_method method;
     /* lengths of method and path strings above */
     size_t method_len, path_len;
     size_t num_headers;

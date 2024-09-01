@@ -612,9 +612,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
                 MAX_SEND_BUFFER_SIZE,
                 RECV_REALLOC_MUL * new_send_buf->capacity);
             if ( ret == MAX_BUF_SIZE_EXCEEDED ) {
-                http_respond_fallback(con_data, Request_Entity_Too_Large,
-                                      SERV_CON_CLOSE);
-                terminate_connection(con_data);
+                return MAX_BUF_SIZE_EXCEEDED;
             }
         } else if ( ret < -1 ) {
             LOG_ERR("copy_headers_to_buf: unknown return value");
@@ -629,32 +627,6 @@ int http_respond(struct client_data *con_data, http_res *response) {
     memcpy(new_send_buf->buffer + bytes_written, HEADERS_END_FMT,
            strlen(HEADERS_END_FMT));
     bytes_written += strlen(HEADERS_END_FMT);
-
-    // load contents of file to buffer, reallocate and keep loading from
-    // last place if needed:
-    /* while ( (ret = load_file_to_buf(new_send_buf->buffer + bytes_written,
-                                    buflen - bytes_written, &bytes_written,
-                                    response->filepath, ret) > 0) ) {
-        if ( ret == -1 ) {
-            // TODO: this could trigger when fseek fails OR when file couldn't
-            // be opened, needs improvement
-            http_respond_fallback(con_data, Not_Found);
-            return -1;
-        }
-
-        status = handler_buf_realloc(
-            &new_send_buf->buffer, &new_send_buf->capacity,
-            MAX_SEND_BUFFER_SIZE, 2 * new_send_buf->capacity);
-
-        switch ( status ) {
-            case HTTP_ENTITY_TOO_LARGE:
-                // TODO
-                break;
-            default:
-                // TODO
-                break;
-        }
-    } */
 
     /* append HTTP message */
     if ( message_exists ) {

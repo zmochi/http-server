@@ -191,20 +191,20 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_loop_data) {
     struct client_data *con_data =
         init_client_data((struct event_data *)event_loop_data, incoming_sockfd);
 
-    event_read = event_new(con_data->event->base, incoming_sockfd,
+    event_read = event_new(con_data->event.base, incoming_sockfd,
                            EV_READ | EV_PERSIST, recv_cb, con_data);
     catchExcp(event_read == NULL, "event_new: couldn't initialize read event",
               1);
 
-    event_write = event_new(con_data->event->base, incoming_sockfd,
+    event_write = event_new(con_data->event.base, incoming_sockfd,
                             EV_WRITE | EV_PERSIST, send_cb, con_data);
     catchExcp(event_write == NULL, "event_new: couldn't initialize write event",
               1);
 
     /* socket must be -1 in event_new() if flags EV_READ or EV_WRITE are not
      * present */
-    event_close_con = event_new(con_data->event->base, -1, EV_TIMEOUT,
-                                close_con_cb, con_data);
+    event_close_con =
+        event_new(con_data->event.base, -1, EV_TIMEOUT, close_con_cb, con_data);
     catchExcp(event_close_con == NULL,
               "event_new: couldn't initialize close-connection event", 1);
 
@@ -214,16 +214,16 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_loop_data) {
     status = event_add(event_write, NULL);
     catchExcp(status == -1, "event_add: couldn't add write event", 1);
 
-    struct timeval client_timeout = con_data->event->timeout;
+    struct timeval client_timeout = con_data->event.timeout;
     status                        = event_add(event_close_con, &client_timeout);
     catchExcp(status == -1, "event_add: couldn't add close-connection event",
               1);
 
-    con_data->event->event_read      = event_read;
-    con_data->event->event_write     = event_write;
-    con_data->event->event_close_con = event_close_con;
+    con_data->event.event_read      = event_read;
+    con_data->event.event_write     = event_write;
+    con_data->event.event_close_con = event_close_con;
     /* TODO: remove this */
-    con_data->event->sockfd = incoming_sockfd;
+    con_data->event.sockfd = incoming_sockfd;
 
     free(sockaddr);
 }
@@ -261,7 +261,7 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
      * if connection timed out/client closed connection, continue (discard
      * unsent data) */
     if ( unsent_data_exists && !timed_out && !client_closed_con ) {
-        event_active(con_data->event->event_write, 0, 0);
+        event_active(con_data->event.event_write, 0, 0);
         return;
     }
 
@@ -277,11 +277,11 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     while ( !finished_sending(con_data) )
         ;
 
-    event_free(con_data->event->event_write);
-    event_free(con_data->event->event_read);
-    event_free(con_data->event->event_close_con);
+    event_free(con_data->event.event_write);
+    event_free(con_data->event.event_read);
+    event_free(con_data->event.event_close_con);
 
-    evutil_closesocket(con_data->event->sockfd);
+    evutil_closesocket(con_data->event.sockfd);
 
     // free(con_data->event);
 
@@ -528,7 +528,7 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
 int terminate_connection(struct client_data *con_data, int flags) {
 
-    event_active(con_data->event->event_close_con, flags, 0);
+    event_active(con_data->event.event_close_con, flags, 0);
 
     return 0;
 }
@@ -877,13 +877,9 @@ static inline int init_client_recv_buf(struct client_data *con_data) {
 static inline int init_client_event(struct client_data *con_data,
                                     struct event_data  *event_loop_data,
                                     socket_t            sockfd) {
-    /* freed in close_con_cb */
-    con_data->event = calloc(1, sizeof(*con_data->event));
-    if ( !con_data->event ) return EXIT_FAILURE;
-
-    con_data->event->base    = event_loop_data->base;
-    con_data->event->timeout = event_loop_data->timeout;
-    con_data->event->sockfd  = sockfd;
+    con_data->event.base    = event_loop_data->base;
+    con_data->event.timeout = event_loop_data->timeout;
+    con_data->event.sockfd  = sockfd;
 
     return EXIT_SUCCESS;
 }
@@ -920,7 +916,7 @@ static inline void reset_http_req(http_req *request) {
 
 int reset_con_data(struct client_data *con_data) {
     int                 request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
-    struct event_data  *event                   = con_data->event;
+    struct event_data   event                   = con_data->event;
     http_req           *req_data                = con_data->request;
     struct send_buffer *send_buf                = con_data->send_buf;
     struct recv_buffer *recv_buf                = con_data->recv_buf;

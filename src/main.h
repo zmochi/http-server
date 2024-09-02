@@ -79,7 +79,7 @@ struct recv_buffer {
 };
 
 struct client_data {
-    struct event_data  *event;
+    struct event_data   event;
     struct send_buffer *send_buf;
     /* TODO: doubly linked list instead of singly with last ptr */
     struct send_buffer *last;

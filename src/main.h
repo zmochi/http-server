@@ -92,7 +92,7 @@ struct recv_buffer {
 };
 
 struct client_data {
-    struct event_data  *event;
+    struct event_data   event;
     struct send_buffer *send_buf;
     /* TODO: doubly linked list instead of singly with last ptr */
     struct send_buffer *last;
@@ -117,10 +117,10 @@ typedef struct {
 } http_res;
 
 typedef struct {
-    char  *ROOT_PATH;
-    char  *PORT;
-    char  *SERVNAME;
-    time_t timeout;
+    char          *ROOT_PATH;
+    char          *PORT;
+    char          *SERVNAME;
+    struct timeval timeout;
     /* generates a reponse to request.
      *  - must use malloc() to allocate response.headers_arr, response.message
      *  - must set all fields of http_res

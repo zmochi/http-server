@@ -104,10 +104,10 @@ typedef struct {
 } http_res;
 
 typedef struct {
-    char  *ROOT_PATH;
-    char  *PORT;
-    char  *SERVNAME;
-    time_t timeout;
+    char          *ROOT_PATH;
+    char          *PORT;
+    char          *SERVNAME;
+    struct timeval timeout;
     /* generates a reponse to request.
      *  - must use malloc() to allocate response.headers_arr, response.message
      *  - must set all fields of http_res

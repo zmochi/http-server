@@ -19,6 +19,16 @@
         exit(1);                                                               \
     }
 
+/* exit() call should not be removed here, will break code */
+#define LOGIC_ERR(err_fmt, ...)                                                \
+    {                                                                          \
+        LOG_ERR(err_fmt, ##__VA_ARGS__);                                       \
+        exit(1);                                                               \
+    }
+
+#define _VALIDATE_LOGIC(logic_cnd, err_msg, ...)                               \
+    if ( !(logic_cnd) ) LOGIC_ERR(err_msg, ##__VA_ARGS__);
+
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 

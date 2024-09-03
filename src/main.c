@@ -1,16 +1,16 @@
 
 #include "main.h"
+/* defines socket_t */
+#include "event_loop.h"
 #include "headers.h"
 #include "http_limits.h"
 #include "http_utils.h"
 #include "parser.h"
 #include "status_codes.h"
 
-/* libevent: */
-#include <event2/event.h>
-
 /* internal libs: */
 #include "../libs/picohttpparser/picohttpparser.h"
+#include <event2/util.h>
 
 /* for log10() function used in http_respond_fallback */
 #include <math.h>
@@ -20,7 +20,7 @@
 static config         server_conf;
 static struct timeval CLIENT_TIMEOUT;
 
-#define DFLT_CLIENT_TIMEOUT_SEC 3
+#define DFLT_TIMEOUT {.tv_sec = 5, .tv_usec = 0}
 
 #define CHECK_CORRUPT_CALL(con_data, sockfd)                                   \
     {                                                                          \
@@ -31,28 +31,20 @@ static struct timeval CLIENT_TIMEOUT;
         }                                                                      \
     }
 
-typedef evutil_socket_t socket_t;
-
 typedef enum {
-    RECV_NODATA      = 1,
-    CON_RESET        = 2,
-    SERV_CON_CLOSE   = 4,
-    CLIENT_CON_CLOSE = 8,
-/* SERV_CON_CLOSE and CLIENT_CON_CLOSE are used in event_active() when signaling
- * connection close event. the event might get the EV_TIMEOUT flag from libevent
- * so make sure all flags the event's callback can receive are different: */
-#if EV_TIMEOUT == SERV_CON_CLOSE || EV_TIMEOUT == CLIENT_CON_CLOSE
-#error "critical: EV_TIMEOUT is equal to existing flags"
-#endif
-} con_flags;
+    RECV_NODATA,
+    CON_RESET,
+    RECV_CLIENT_CLOSED_CON,
+    SUCCESS,
+} recv_flags;
 
 struct addrinfo   *get_local_addrinfo(const char *port);
 int                local_socket_bind_listen(const char *port);
 static void        http_header_init(struct http_header *header,
                                     const char *header_name, const char *header_value);
 static inline void http_free_response_headers(http_res *response);
-void               accept_cb(evutil_socket_t, short, void *);
-void               send_cb(evutil_socket_t sockfd, short flags, void *arg);
+void               accept_cb(socket_t, short, void *);
+void               send_cb(socket_t sockfd, short flags, void *arg);
 
 /**
  * @brief Callback function to read data sent from client.
@@ -63,7 +55,7 @@ void               send_cb(evutil_socket_t sockfd, short flags, void *arg);
  * matches the required signature for callback function in documentation of
  * `event_new()`.
  */
-void recv_cb(evutil_socket_t, short, void *);
+void recv_cb(socket_t, short, void *);
 
 /**
  * @brief Receives pending data in @sockfd into the recv buffer in @con_data
@@ -72,10 +64,10 @@ void recv_cb(evutil_socket_t, short, void *);
  * @param con_data connection data
  * @return RECV_NODATA if there is no data to receive (but connection hasn't
  * been closed) CONN_RESET if client forcibly closed connection (TCP RST
- * packet) CLIENT_CON_CLOSE if client gracefully closed connection (TCP FIN
- * packet)
+ * packet) RECV_CLIENT_CLOSED_CON if client gracefully closed connection (TCP
+ * FIN packet)
  */
-int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
+int recv_data(socket_t sockfd, struct client_data *con_data);
 
 /**
  * @brief Callback function that handles closing connections
@@ -89,7 +81,7 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data);
  * @param flags libevent flags
  * @param arg struct client_data of connection
  */
-void close_con_cb(evutil_socket_t sockfd, short flags, void *arg);
+void close_con_cb(socket_t sockfd, short flags, void *arg);
 
 int         http_respond(struct client_data *con_data, http_res *response);
 void        http_respond_fallback(struct client_data *con_data,
@@ -97,8 +89,7 @@ void        http_respond_fallback(struct client_data *con_data,
 int         reset_con_data(struct client_data *con_data);
 static void reset_http_req(http_req *request);
 int         terminate_connection(struct client_data *con_data, int flags);
-struct client_data *init_client_data(struct event_data *event_loop_data,
-                                     evutil_socket_t    sockfd);
+struct client_data *init_client_data(socket_t socket);
 
 bool finished_sending(struct client_data *con_data);
 int  finished_receiving(struct client_data *con_data);
@@ -114,11 +105,6 @@ bool is_conf_valid(config conf) {
 }
 
 int init_server(config conf) {
-    struct event_base *base;
-    evutil_socket_t    main_sockfd;
-    int                status;
-    struct event      *event_accept;
-    struct event      *event_write;
 
     server_conf = conf;
     if ( !is_conf_valid(conf) ) {
@@ -126,46 +112,27 @@ int init_server(config conf) {
         exit(1);
     }
 
-    base = event_base_new();
-    catchExcp(base == NULL, "Couldn't open event base.", 1);
+    socket_t main_sockfd = local_socket_bind_listen(server_conf.PORT);
+    evutil_make_socket_nonblocking(main_sockfd);
 
-    main_sockfd = local_socket_bind_listen(server_conf.PORT);
+    struct event_loop base_loop = {
+        .listen_sockfd   = main_sockfd,
+        .default_timeout = conf.timeout,
+        .read_cb         = recv_cb,
+        .write_cb        = send_cb,
+        .close_conn_cb   = close_con_cb,
+        .new_conn_cb     = accept_cb,
+    };
 
-    /* event data of the event loop */
-    struct event_data event_accept_args = {
-        .base    = base /* event loop base */,
-        .timeout = conf.timeout /* timeout shared for all clients */,
-        .sockfd  = main_sockfd /* listening socket fd */};
-
-    /* event_accept is triggered when there's a new connection and calls
-     * accept_cb
-     *
-     * EV_PERSIST keeps the event active (listening for new connections) instead
-     * of sending it to sleep after a single wake-up */
-    event_accept =
-        event_new(base, main_sockfd, EV_READ | /* EV_WRITE |  */ EV_PERSIST,
-                  accept_cb, &event_accept_args);
-    catchExcp(event_accept == NULL, "event_new: couldn't initialize read event",
-              1);
-
-    status = event_add(event_accept, NULL);
-    catchExcp(status == -1, "event_add: couldn't add read event",
-              1); // TODO: timeout
-
-    status = event_base_loop(base, EVLOOP_NO_EXIT_ON_EMPTY);
-    catchExcp(status == -1, "event_base_loop: couldn't start event loop", 1);
+    /* doesn't return until the server terminates */
+    ev_init_loop(&base_loop);
 
     evutil_closesocket(main_sockfd);
-    event_free(event_accept);
 
-    return 0;
+    return EXIT_SUCCESS;
 }
 
-void accept_cb(evutil_socket_t sockfd, short flags, void *event_loop_data) {
-    struct event   *event_read, *event_write, *event_close_con;
-    evutil_socket_t incoming_sockfd;
-    int             status;
-
+void accept_cb(socket_t sockfd, short flags, void *event_loop_data) {
     // sockaddr big enough for either IPv4 or IPv6
     // contains info about connection
     struct sockaddr_storage *sockaddr =
@@ -173,9 +140,7 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_loop_data) {
     if ( !sockaddr ) HANDLE_ALLOC_FAIL();
     ev_socklen_t sockaddr_size = sizeof(struct sockaddr_storage);
 
-    /* accept won't block here since accept_cb is called when there's a pending
-     * connection */
-    incoming_sockfd =
+    socket_t incoming_sockfd =
         accept(sockfd, (struct sockaddr *)sockaddr, &sockaddr_size);
 
     if ( incoming_sockfd ==
@@ -187,44 +152,11 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_loop_data) {
 
     evutil_make_socket_nonblocking(incoming_sockfd);
 
-    /* Initializing connection data, init_client_data allocates neccesary
-     * memory */
-    struct client_data *con_data =
-        init_client_data((struct event_data *)event_loop_data, incoming_sockfd);
-
-    event_read = event_new(con_data->event.base, incoming_sockfd,
-                           EV_READ | EV_PERSIST, recv_cb, con_data);
-    catchExcp(event_read == NULL, "event_new: couldn't initialize read event",
-              1);
-
-    event_write = event_new(con_data->event.base, incoming_sockfd,
-                            EV_WRITE | EV_PERSIST, send_cb, con_data);
-    catchExcp(event_write == NULL, "event_new: couldn't initialize write event",
-              1);
-
-    /* socket must be -1 in event_new() if flags EV_READ or EV_WRITE are not
-     * present */
-    event_close_con =
-        event_new(con_data->event.base, -1, EV_TIMEOUT, close_con_cb, con_data);
-    catchExcp(event_close_con == NULL,
-              "event_new: couldn't initialize close-connection event", 1);
-
-    status = event_add(event_read, NULL);
-    catchExcp(status == -1, "event_add: couldn't add read event", 1);
-
-    status = event_add(event_write, NULL);
-    catchExcp(status == -1, "event_add: couldn't add write event", 1);
-
-    struct timeval client_timeout = con_data->event.timeout;
-    status                        = event_add(event_close_con, &client_timeout);
-    catchExcp(status == -1, "event_add: couldn't add close-connection event",
-              1);
-
-    con_data->event.event_read      = event_read;
-    con_data->event.event_write     = event_write;
-    con_data->event.event_close_con = event_close_con;
-    /* TODO: remove this */
-    con_data->event.sockfd = incoming_sockfd;
+    LOG("allocating con_data");
+    struct client_data *con_data = init_client_data(incoming_sockfd);
+    /* event loop to init event on, event to init, arg to pass to callbacks
+     */
+    con_data->event = ev_add_conn(event_loop_data, incoming_sockfd, con_data);
 
     free(sockaddr);
 }
@@ -235,22 +167,27 @@ void accept_cb(evutil_socket_t sockfd, short flags, void *event_loop_data) {
  * manually)
  *
  * @param sockfd socket of connection
- * @param flags libevent flags
+ * @param flags a bitmask of flags of type `enum ev_flags` defined in
+ * `event_loop.h`. SERV_CON_CLOSE indicates server is initiating the
+ * termination, CLIENT_CON_CLOSE indicates the client has already closed the
+ * connection, and TIMEOUT indicates the connection timed out.
  * @param arg ptr to struct client_data of connection
  */
-void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
+void close_con_cb(socket_t sockfd, short flags, void *arg) {
     LOG();
     struct client_data *con_data = (struct client_data *)arg;
     struct recv_buffer *recv_buf = con_data->recv_buf;
     struct send_buffer *send_buf = con_data->send_buf;
 
-    bool timed_out              = flags & EV_TIMEOUT;
+    bool timed_out              = flags & TIMEOUT;
     bool server_close_requested = flags & SERV_CON_CLOSE;
     bool client_closed_con      = flags & CLIENT_CON_CLOSE;
     bool unsent_data_exists     = !(con_data->send_buf == NULL);
 
     if ( timed_out ) LOG("timed_out");
     if ( unsent_data_exists ) LOG("unsent_data_exis");
+    if ( client_closed_con ) LOG("client_closed_con");
+    if ( server_close_requested ) LOG("server_close_requested");
     /* failsafe: don't close connection if close wasn't requested, client didn't
      * close connection or connection didn't timeout */
     if ( !(server_close_requested || client_closed_con || timed_out) ) {
@@ -262,7 +199,6 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
      * if connection timed out/client closed connection, continue (discard
      * unsent data) */
     if ( unsent_data_exists && !timed_out && !client_closed_con ) {
-        event_active(con_data->event.event_write, 0, 0);
         return;
     }
 
@@ -278,13 +214,9 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     while ( !finished_sending(con_data) )
         ;
 
-    event_free(con_data->event.event_write);
-    event_free(con_data->event.event_read);
-    event_free(con_data->event.event_close_con);
+    ev_remove_conn(con_data->event);
 
-    evutil_closesocket(con_data->event.sockfd);
-
-    // free(con_data->event);
+    evutil_closesocket(con_data->sockfd);
 
     if ( !(con_data->request == NULL) )
         free(con_data->request);
@@ -302,7 +234,7 @@ void close_con_cb(evutil_socket_t sockfd, short flags, void *arg) {
     printf("\n");
 }
 
-void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
+void send_cb(socket_t sockfd, short flags, void *arg) {
     LOG("send_cb");
 
     struct client_data *con_data = (struct client_data *)arg;
@@ -329,8 +261,11 @@ void send_cb(evutil_socket_t sockfd, short flags, void *arg) {
                 evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
         exit(1);
     } else if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
-        /* all data sent, get next send buffer in the queue. */
-        finished_sending(con_data);
+        /* all data sent, get next send buffer in the queue.
+         * if there are no more buffers and connection should be closed, wake
+         * close event */
+        if ( finished_sending(con_data) && con_data->close_requested )
+            event_wake(con_data->event, EV_CLOSE, SERV_CON_CLOSE);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
         con_data->send_buf->bytes_sent += nbytes;
@@ -394,7 +329,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
-void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
+void recv_cb(socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
 
@@ -410,12 +345,12 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
         case CON_RESET:
             LOG("client forcibly closed connection");
-        case CLIENT_CON_CLOSE:
+        case RECV_CLIENT_CLOSED_CON:
             LOG("client gracefully closed connection");
             terminate_connection(con_data, CLIENT_CON_CLOSE);
             return;
 
-        case EXIT_SUCCESS:
+        case SUCCESS:
             break;
 
         default:
@@ -527,12 +462,14 @@ void recv_cb(evutil_socket_t sockfd, short flags, void *arg) {
 
 int terminate_connection(struct client_data *con_data, int flags) {
 
-    event_active(con_data->event.event_close_con, flags, 0);
+    con_data->close_requested = true;
+
+    event_wake(con_data->event, EV_CLOSE, flags);
 
     return 0;
 }
 
-int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
+int recv_data(socket_t sockfd, struct client_data *con_data) {
     ev_ssize_t          nbytes   = 0;
     struct recv_buffer *recv_buf = con_data->recv_buf;
 
@@ -558,11 +495,11 @@ int recv_data(evutil_socket_t sockfd, struct client_data *con_data) {
                 exit(1);
         }
     } else if ( nbytes == 0 ) {
-        return CLIENT_CON_CLOSE;
+        return RECV_CLIENT_CLOSED_CON;
     }
 
     recv_buf->bytes_received += nbytes;
-    return 0;
+    return SUCCESS;
 }
 
 struct send_buffer *malloc_init_send_buf(size_t capacity) {
@@ -884,25 +821,17 @@ static inline int init_client_recv_buf(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
-static inline int init_client_event(struct client_data *con_data,
-                                    struct event_data  *event_loop_data,
-                                    socket_t            sockfd) {
-    con_data->event.base    = event_loop_data->base;
-    con_data->event.timeout = event_loop_data->timeout;
-    con_data->event.sockfd  = sockfd;
-
+static inline int init_client_event(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
-struct client_data *init_client_data(struct event_data *event_loop_data,
-                                     socket_t           sockfd) {
+struct client_data *init_client_data(socket_t socket) {
     int send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
 
     struct client_data *con_data = calloc(1, sizeof(struct client_data));
     if ( !con_data ) HANDLE_ALLOC_FAIL();
 
-    if ( init_client_event(con_data, event_loop_data, sockfd) == EXIT_FAILURE )
-        HANDLE_ALLOC_FAIL();
+    if ( init_client_event(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
     if ( init_client_recv_buf(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
@@ -910,6 +839,9 @@ struct client_data *init_client_data(struct event_data *event_loop_data,
 
     con_data->append_response = append_response;
 
+    con_data->close_requested = false;
+
+    con_data->sockfd = socket;
     return con_data;
 }
 
@@ -926,7 +858,7 @@ static inline void reset_http_req(http_req *request) {
 
 int reset_con_data(struct client_data *con_data) {
     int                 request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
-    struct event_data   event                   = con_data->event;
+    struct conn_data   *event                   = con_data->event;
     http_req           *req_data                = con_data->request;
     struct send_buffer *send_buf                = con_data->send_buf;
     struct recv_buffer *recv_buf                = con_data->recv_buf;
@@ -974,12 +906,12 @@ int finish_request_processing(struct client_data *con_data) {
  * @param servinfo
  * @return int
  */
-evutil_socket_t local_socket_bind_listen(const char *restrict port) {
+socket_t local_socket_bind_listen(const char *restrict port) {
     struct addrinfo *servinfo = get_local_addrinfo(port);
     struct addrinfo *servinfo_next;
     struct sockaddr *sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
     int              status;
-    evutil_socket_t  main_sockfd;
+    socket_t         main_sockfd;
 
     for ( servinfo_next = servinfo; servinfo_next != NULL;
           servinfo_next = servinfo_next->ai_next ) {

@@ -1,3 +1,4 @@
+#include "event_loop.h"
 #include "headers.h"
 #include "status_codes.h"
 #ifdef _WIN32
@@ -17,7 +18,6 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <time.h>
 
 #ifndef __MAIN_H
 #define __MAIN_H
@@ -39,15 +39,6 @@ enum http_header_props {
     HEADER_VALUE_VALID       = 2,
     HEADER_EXISTS            = 4,
     HEADER_VALUE_EXCEEDS_MAX = 8,
-};
-
-struct event_data { // TODO: change name to client_ev_data
-    struct event_base *base;
-    evutil_socket_t    sockfd;
-    struct timeval     timeout;
-    void              *event_read;
-    void              *event_write;
-    void              *event_close_con;
 };
 
 enum http_method {
@@ -92,7 +83,8 @@ struct recv_buffer {
 };
 
 struct client_data {
-    struct event_data   event;
+    socket_t            sockfd;
+    struct conn_data   *event;
     struct send_buffer *send_buf;
     /* TODO: doubly linked list instead of singly with last ptr */
     struct send_buffer *last;
@@ -100,6 +92,7 @@ struct client_data {
     http_req           *request;
     int (*append_response)(struct client_data *con_data,
                            struct send_buffer *response);
+    bool close_requested;
 };
 
 enum res_flags {

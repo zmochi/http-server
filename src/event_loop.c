@@ -215,12 +215,6 @@ struct event *add_event(struct event_base *base, socket_t socket,
     libevent_flag_t libevent_flags;
     int             status;
 
-    if ( ev_type == EV_NEWCONN )
-        _VALIDATE_LOGIC(
-            arg == NULL,
-            "user `arg` in EV_NEWCONN event should always be null, the actual "
-            "argument passed is set to be relevant `struct event_loop`");
-
     /* EV_PERSIST keeps the event active (always checking if there is
      * anything to send/read or new connections) instead of sending it to sleep
      * after a single wake-up */

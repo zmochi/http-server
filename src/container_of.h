@@ -1,5 +1,10 @@
-#define offsetof(type, member)                                                 \
-    ((size_t)((char *)((char *)(&((type *)0)->member) - (char *)0)))
+/* for offsetof() macro */
+#include <stddef.h>
+
+#ifndef __CONTAINER_OF_H
+#define __CONTAINER_OF_H
 
 #define container_of(item_ptr, container_type, member)                         \
     ((container_type *)((char *)item_ptr - offsetof(container_type, member)))
+
+#endif /* __CONTAINER_OF_H */

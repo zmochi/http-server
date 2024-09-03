@@ -18,7 +18,7 @@ MAKE = make
 CC = clang
 
 # header file names with path relative to $(H_DIR)
-_HDEPS = headers.h main.h http_utils.h status_codes.h http_limits.h parser.h event_loop.h
+_HDEPS = headers.h main.h http_utils.h status_codes.h http_limits.h parser.h event_loop.h container_of.h list.h queue.h
 # c file names with path relative to $(SRC_DIR)
 _CDEPS = headers.c main.c http_utils.c status_codes.c http_limits.c parser.c event_loop.c
 HDEPS = $(patsubst %.h,$(H_DIR)/%.h,$(_HDEPS))

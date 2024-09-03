@@ -453,6 +453,17 @@ void recv_cb(socket_t sockfd, short flags, void *arg) {
 
     http_respond(con_data, &response);
 
+    const char *CONNECTION_HEADER_NAME = "Connection";
+    const char *CONNECTION_CLOSE_VALUE = "close";
+
+    if ( http_extract_validate_header(
+             con_data->request->headers, CONNECTION_HEADER_NAME,
+             strlen(CONNECTION_HEADER_NAME), CONNECTION_CLOSE_VALUE,
+             strlen(CONNECTION_CLOSE_VALUE)) &
+         HEADER_VALUE_VALID ) {
+        terminate_connection(con_data, SERV_CON_CLOSE);
+    }
+
     if ( response.headers_arr != NULL ) free(response.headers_arr);
     if ( response.message != NULL ) free(response.message);
 

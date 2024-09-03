@@ -1,5 +1,6 @@
 #include "event_loop.h"
 #include "headers.h"
+#include "queue.h"
 #include "status_codes.h"
 #ifdef _WIN32
 #include <winsock.h>
@@ -70,9 +71,9 @@ typedef struct {
 } http_req;
 
 struct send_buffer {
-    char               *buffer;
-    size_t              bytes_sent, actual_len, capacity;
-    struct send_buffer *next;
+    char            *buffer;
+    size_t           bytes_sent, actual_len, capacity;
+    struct list_item entry;
 };
 
 struct recv_buffer {
@@ -85,14 +86,10 @@ struct recv_buffer {
 struct client_data {
     socket_t            sockfd;
     struct conn_data   *event;
-    struct send_buffer *send_buf;
-    /* TODO: doubly linked list instead of singly with last ptr */
-    struct send_buffer *last;
+    struct queue        send_queue;
     struct recv_buffer *recv_buf;
     http_req           *request;
-    int (*append_response)(struct client_data *con_data,
-                           struct send_buffer *response);
-    bool close_requested;
+    bool                close_requested;
 };
 
 enum res_flags {

@@ -335,12 +335,16 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 static inline int parse_request(struct client_data *con_data,
                                 struct http_header *headers_arr,
                                 size_t              headers_arr_cap) {
-    return http_parse_request(
+    int status = http_parse_request(
         con_data->recv_buf->buffer, con_data->recv_buf->bytes_received,
         &con_data->request->method, &con_data->request->path,
         &con_data->request->path_len, &con_data->request->minor_ver,
         headers_arr, &con_data->request->num_headers,
         &con_data->recv_buf->bytes_parsed);
+
+    if ( con_data->request->method == M_UNKNOWN ) return HTTP_BAD_REQ;
+
+    return status;
 }
 
 static inline int parse_content(struct client_data *con_data,

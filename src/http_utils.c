@@ -1,6 +1,7 @@
 #include "http_utils.h"
 #include "headers.h"
 
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,8 +59,8 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
 
         /* snprintf should be fine since HTTP standard disallows null bytes in
          * header values */
-        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header.header_name,
-                       header.header_value);
+        ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header.name,
+                       header.value);
 
         if ( ret > eff_bufcap ) { // out of memory, capacity too small
             return NO_MEM_ERR;
@@ -125,10 +126,10 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
 }
 
 int populate_headers_map(struct header_hashset *set,
-                         struct phr_header headers[], size_t num_headers) {
+                         struct http_header headers[], size_t num_headers) {
 
     for ( int i = 0; i < num_headers; i++ ) {
-        struct phr_header header = headers[i];
+        struct http_header header = headers[i];
         http_set_header(set, header.name, header.name_len, header.value,
                         header.value_len);
     }
@@ -140,10 +141,11 @@ int http_extract_validate_header(struct header_hashset *set,
                                  size_t header_name_len,
                                  const char *restrict expected_value,
                                  size_t expected_value_len) {
-    short header_flags = 0;
-    int   header_value_len;
-    char *header_value =
-        http_get_header(set, header_name, header_name_len, &header_value_len);
+    short                header_flags = 0;
+    struct header_value *header_value =
+        http_get_header(set, header_name, header_name_len);
+    char *header_value_buf = header_value->value;
+    int   header_value_len = header_value->value_len;
 
     if ( header_value_len != 0 ) {
         header_flags |= HEADER_EXISTS;
@@ -151,47 +153,11 @@ int http_extract_validate_header(struct header_hashset *set,
 #define MIN(a, b) ((a < b) ? a : b)
         /* compare against expected value if needed: */
         if ( expected_value != NULL &&
-             strncmp(header_value, expected_value,
+             strncmp(header_value_buf, expected_value,
                      MIN(expected_value_len, header_value_len)) == 0 ) {
             header_flags |= HEADER_VALUE_VALID;
         }
     }
-
-    return header_flags;
-}
-
-int http_extract_content_length(struct header_hashset *set,
-                                size_t                *content_length_storage,
-                                size_t                 max_content_length) {
-
-    short header_flags = 0;
-    int   content_len_strlen;
-    char *content_len_str = http_get_header(
-        set, "Content-Length", strlen("Content-Length"), &content_len_strlen);
-
-    if ( content_len_strlen == 0 ) {
-        return header_flags;
-    }
-
-    header_flags |= HEADER_EXISTS;
-
-    if ( !is_integer(content_len_str, content_len_strlen) ) {
-        return header_flags;
-    }
-
-    // set null byte at end of string for call to `strtoumax`:
-    *(content_len_str + content_len_strlen + 1) = '\x00';
-
-    uintmax_t content_length = strtoumax(content_len_str, NULL, 10);
-
-    if ( content_length > max_content_length ) {
-        header_flags |= HEADER_VALUE_EXCEEDS_MAX;
-    } else {
-        header_flags |= HEADER_VALUE_VALID;
-    }
-
-    *content_length_storage =
-        (size_t)content_length; // TODO: check if this cast is valid
 
     return header_flags;
 }
@@ -202,28 +168,19 @@ int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
     // requires 3x space allocation)
 
     if ( *bufsize >= max_size ) {
-        return MAX_BUF_SIZE_EXCEEDED;
+        return 1;
     }
     *buf     = realloc(*buf, new_size);
     *bufsize = new_size;
     if ( *buf == NULL ) {
         // TODO
+        HANDLE_ALLOC_FAIL();
         exit(1);
     }
 
     return 0;
 }
 
-/**
- * @brief converts a non-negative size_t variable to a string (e.g 100 -> "100")
- * adds a null byte at end of string
- *
- * @param str buffer to place the result in
- * @param strcap capacity of buffer
- * @param num num to stringify
- * @return on success, number of characters written to @str, not including null
- * byte. -1 on failure
- */
 ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
     ev_ssize_t ret;
 
@@ -232,6 +189,26 @@ ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
     }
 
     return ret;
+}
+
+ev_ssize_t str_to_positive_num(const char *str, size_t strlen) {
+
+    /* +1 for null byte */
+    size_t local_strlen = strlen + 1;
+    char   local_str[local_strlen];
+    char  *endptr;
+
+    /* copy content_len into null terminated string to avoid surprises with
+     * strtoumax, which expects a null terminated string */
+    memcpy(local_str, str, strlen);
+    /* terminate str with null */
+    local_str[ARR_SIZE(local_str)] = 0;
+
+    uintmax_t content_length = strtoumax(local_str, &endptr, 10);
+
+    if ( endptr < local_str + local_strlen ) return -1;
+
+    return content_length;
 }
 
 /**

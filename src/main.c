@@ -9,7 +9,6 @@
 #include "status_codes.h"
 
 /* internal libs: */
-#include "../libs/picohttpparser/picohttpparser.h"
 #include <event2/util.h>
 
 /* for log10() function used in http_respond_fallback */
@@ -49,13 +48,10 @@ static inline struct send_buffer *peek_send_buf(struct queue *queue) {
     return list_entry(queue->head, struct send_buffer, entry);
 }
 
-struct addrinfo   *get_local_addrinfo(const char *port);
-int                local_socket_bind_listen(const char *port);
-static void        http_header_init(struct http_header *header,
-                                    const char *header_name, const char *header_value);
-static inline void http_free_response_headers(http_res *response);
-void               accept_cb(socket_t, short, void *);
-void               send_cb(socket_t sockfd, short flags, void *arg);
+struct addrinfo *get_local_addrinfo(const char *port);
+int              local_socket_bind_listen(const char *port);
+void             accept_cb(socket_t, short, void *);
+void             send_cb(socket_t sockfd, short flags, void *arg);
 
 /**
  * @brief Callback function to read data sent from client.
@@ -94,12 +90,18 @@ int recv_data(socket_t sockfd, struct client_data *con_data);
  */
 void close_con_cb(socket_t sockfd, short flags, void *arg);
 
-int         http_respond(struct client_data *con_data, http_res *response);
-void        http_respond_fallback(struct client_data *con_data,
-                                  http_status_code status_code, int http_res_flags);
-int         reset_con_data(struct client_data *con_data);
-static void reset_http_req(http_req *request);
-int         terminate_connection(struct client_data *con_data, int flags);
+int  http_respond(struct client_data *con_data, http_res *response);
+void http_respond_builtin_status(struct client_data *con_data,
+                                 http_status_code    status_code,
+                                 int                 http_res_flags);
+static inline int parse_request(struct client_data *con_data,
+                                struct http_header *headers_arr,
+                                size_t              headers_arr_capstruct);
+static inline int parse_content(struct client_data *con_data,
+                                struct header_value content_len_header,
+                                size_t             *content_len);
+static void       reset_http_req(http_req *request);
+int               terminate_connection(struct client_data *con_data, int flags);
 struct client_data *init_client_data(socket_t socket);
 
 bool finished_sending(struct client_data *con_data);
@@ -320,9 +322,9 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 
         // TODO out of memory err in handler_buf_realloc
         switch ( status ) {
-            case MAX_BUF_SIZE_EXCEEDED:
-                http_respond_fallback(con_data, Request_Entity_Too_Large,
-                                      SERV_CON_CLOSE);
+            case -2:
+                http_respond_builtin_status(con_data, Request_Entity_Too_Large,
+                                            SERV_CON_CLOSE);
                 terminate_connection(con_data, SERV_CON_CLOSE);
         }
     }
@@ -330,9 +332,32 @@ int http_handle_incomplete_req(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
+static inline int parse_request(struct client_data *con_data,
+                                struct http_header *headers_arr,
+                                size_t              headers_arr_cap) {
+    return http_parse_request(
+        con_data->recv_buf->buffer, con_data->recv_buf->bytes_received,
+        &con_data->request->method, &con_data->request->path,
+        &con_data->request->path_len, &con_data->request->minor_ver,
+        headers_arr, &con_data->request->num_headers,
+        &con_data->recv_buf->bytes_parsed);
+}
+
+static inline int parse_content(struct client_data *con_data,
+                                struct header_value content_len_header,
+                                size_t             *content_len) {
+    return http_parse_content(
+        con_data->request->message,
+        con_data->recv_buf->bytes_received - con_data->recv_buf->bytes_parsed,
+        content_len_header.value, content_len_header.value_len,
+        MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_received, content_len);
+}
+
 void recv_cb(socket_t sockfd, short flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
+    size_t             *bytes_parsed   = &con_data->recv_buf->bytes_parsed;
+    size_t             *bytes_received = &con_data->recv_buf->bytes_received;
 
     /* this function calls recv() once, populates con_data->recv_buf, and
      * returns appropriate error codes. If there's still data to read after
@@ -366,15 +391,15 @@ void recv_cb(socket_t sockfd, short flags, void *arg) {
         /* parses everything preceding the content from request, populates
          * @headers array with pointers to the HTTP headers and
          * their values in the original request */
-        struct phr_header headers[MAX_NUM_HEADERS];
+        struct http_header headers[MAX_NUM_HEADERS];
         /* must be initialized to capacity of @headers, after http_parse_request
          * returns its value is changed to the actual nyumber of headers */
         size_t num_headers = MAX_NUM_HEADERS;
-        status = http_parse_request(con_data, headers, &num_headers);
+        status             = parse_request(con_data, headers, num_headers);
 
         switch ( status ) {
             case HTTP_BAD_REQ:
-                http_respond_fallback(con_data, Bad_Request, 0);
+                http_respond_builtin_status(con_data, Bad_Request, 0);
                 return;
 
             case HTTP_INCOMPLETE_REQ:
@@ -399,8 +424,7 @@ void recv_cb(socket_t sockfd, short flags, void *arg) {
 
     /* write start address of content (message) to the http request struct in
      * this connection */
-    con_data->request->message =
-        con_data->recv_buf->buffer + con_data->recv_buf->bytes_parsed;
+    con_data->request->message = con_data->recv_buf->buffer + *bytes_parsed;
 
     /* special rules for HTTP 1.1 */
     if ( con_data->request->minor_ver == 1 ) {
@@ -411,14 +435,21 @@ void recv_cb(socket_t sockfd, short flags, void *arg) {
             strlen(HOST_HEADER_NAME), NULL, 0);
 
         if ( !(host_header_flags & HEADER_EXISTS) ) {
-            http_respond_fallback(con_data, Bad_Request, 0);
+            http_respond_builtin_status(con_data, Bad_Request, 0);
             return;
         }
     }
 
     /* continue parsing HTTP message content (or begin parsing if this is the
      * first time) */
-    status = http_parse_content(con_data, &con_data->request->message_length);
+    size_t               content_len        = 0;
+    struct header_value *content_len_header = http_get_header(
+        con_data->request->headers, "Content-Length", strlen("Content-Length"));
+    if ( content_len_header != NULL ) {
+        status = parse_content(con_data, *content_len_header, &content_len);
+    } else {
+        status = HTTP_OK;
+    }
 
     switch ( status ) {
         case HTTP_INCOMPLETE_REQ:
@@ -426,16 +457,18 @@ void recv_cb(socket_t sockfd, short flags, void *arg) {
             return; /* wait for more data to become available */
 
         case HTTP_ENTITY_TOO_LARGE:
-            /* http_respond_fallback sends Connection: close */
-            http_respond_fallback(con_data, Request_Entity_Too_Large, 0);
+            /* closes connection if entity too large, since there is no space to
+             * process more additional requests */
+            http_respond_builtin_status(con_data, Request_Entity_Too_Large,
+                                        SERV_CON_CLOSE);
             return;
 
         case HTTP_BAD_REQ:
-            /* http_respond_fallback sends Connection: close */
-            http_respond_fallback(con_data, Bad_Request, 0);
+            http_respond_builtin_status(con_data, Bad_Request, 0);
             return;
 
-        case EXIT_SUCCESS:
+        case HTTP_OK:
+            *bytes_parsed += content_len;
             break;
 
         default:
@@ -443,6 +476,8 @@ void recv_cb(socket_t sockfd, short flags, void *arg) {
                     "terminating server");
             exit(EXIT_FAILURE);
     }
+
+    con_data->recv_buf->content_parsed = true;
 
     http_res response = server_conf.handler(con_data->request);
 
@@ -601,7 +636,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
                 &new_send_buf->buffer, &new_send_buf->capacity,
                 MAX_SEND_BUFFER_SIZE,
                 RECV_REALLOC_MUL * new_send_buf->capacity);
-            if ( ret == MAX_BUF_SIZE_EXCEEDED ) {
+            if ( ret == -2 ) {
                 return MAX_BUF_SIZE_EXCEEDED;
             }
         } else if ( ret < -1 ) {
@@ -643,23 +678,6 @@ int http_respond(struct client_data *con_data, http_res *response) {
     return 0;
 }
 
-static inline void http_header_init(struct http_header *header,
-                                    const char         *header_name,
-                                    const char         *header_value) {
-    header->header_name  = header_name;
-    header->header_value = header_value;
-}
-
-static inline void http_free_response_headers(http_res *response) {
-    struct http_header *next, *header = response->headers_arr;
-
-    while ( header != NULL ) {
-        next = header->next;
-        free(header);
-        header = next;
-    }
-}
-
 /**
  * @brief sends default response for the specified @status_code
  * the response for status code XXX is expected to be found in the root folder
@@ -669,8 +687,9 @@ static inline void http_free_response_headers(http_res *response) {
  * @param status_code status code of the response
  * @param http_res_flags a bitmask of flags from enum http_res_flag
  */
-void http_respond_fallback(struct client_data *con_data,
-                           http_status_code status_code, int http_res_flags) {
+void http_respond_builtin_status(struct client_data *con_data,
+                                 http_status_code    status_code,
+                                 int                 http_res_flags) {
     LOG();
     http_res     response;
     size_t       init_file_content_cap = INIT_SEND_BUFFER_CAPACITY;
@@ -714,7 +733,7 @@ void http_respond_fallback(struct client_data *con_data,
             handler_buf_realloc(&file_contents_buf, &init_file_content_cap,
                                 MAX_FILE_READ_SIZE, init_file_content_cap * 2);
 
-        if ( status == MAX_BUF_SIZE_EXCEEDED ) {
+        if ( status == -2 ) {
             LOG_ERR("file at %s exceeds max read size, aborting.",
                     message_filepath);
             free(file_contents_buf);

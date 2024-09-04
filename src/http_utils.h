@@ -1,6 +1,8 @@
 #include "../libs/boost/CURRENT_FUNCTION.hpp"
 #include "headers.h"
-#include "main.h"
+
+#include <event2/util.h>
+#include <stdio.h>
 
 #ifndef __HTTP_UTILS_H
 #define __HTTP_UTILS_H
@@ -44,24 +46,49 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
  * @return 0 on success, -1 on error, or the number of
  * bytes written to buffer if EOF was not reached.
  */
-ev_ssize_t  load_file_to_buf(FILE *file, char *buf, size_t buflen,
-                             size_t *last_len);
-int         populate_headers_map(struct header_hashset *set,
-                                 struct phr_header headers[], size_t num_headers);
-int         http_extract_validate_header(struct header_hashset *set,
-                                         const char            *header_name,
-                                         size_t                 header_name_len,
-                                         const char            *expected_value,
-                                         size_t                 expected_value_len);
-int         http_extract_content_length(struct header_hashset *set,
-                                        size_t                *content_length_storage,
-                                        size_t                 max_content_length);
-int         handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
-                                ev_ssize_t new_size);
-const char *stringify_statuscode(http_status_code status_code);
-bool        is_integer(const char str[], int str_len);
-ev_ssize_t  num_to_str(char *str, size_t strcap, size_t num);
-int         strftime_gmtformat(char *buf, size_t buflen);
-void        catchExcp(int condition, const char *err_msg, int action);
+ev_ssize_t load_file_to_buf(FILE *file, char *buf, size_t buflen,
+                            size_t *last_len);
+int        populate_headers_map(struct header_hashset *set,
+                                struct http_header headers[], size_t num_headers);
+int        http_extract_validate_header(struct header_hashset *set,
+                                        const char            *header_name,
+                                        size_t                 header_name_len,
+                                        const char            *expected_value,
+                                        size_t                 expected_value_len);
+/**
+ * @brief reallocates buffer to new size, if not exceeding max_size
+ *
+ * @param buf ptr to buffer
+ * @param bufsize ptr to capacity of buffer
+ * @param max_size maximum demanded capacity of buffer
+ * @param new_size capacity to reallocate to
+ * @return 0 on success, -2 if new_size is exceeded
+ */
+int  handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
+                         ev_ssize_t new_size);
+bool is_integer(const char str[], int str_len);
+
+/**
+ * @brief converts a non-negative size_t variable to a string (e.g 100 -> "100")
+ * adds a null byte at end of string
+ *
+ * @param str buffer to place the result in
+ * @param strcap capacity of buffer
+ * @param num num to stringify
+ * @return on success, number of characters written to @str, not including null
+ * byte. -1 on failure
+ */
+ev_ssize_t num_to_str(char *str, size_t strcap, size_t num);
+
+/**
+ * @brief returns the numeric value of a string.
+ *
+ * @param str string containing the number to convert
+ * @param strlen length of string to convert, must be > 0
+ * @return the numeric value of the string, or -1 if can't be converted
+ */
+ev_ssize_t str_to_positive_num(const char *str, size_t strlen);
+int        strftime_gmtformat(char *buf, size_t buflen);
+void       catchExcp(int condition, const char *err_msg, int action);
 
 #endif /* __HTTP_UTILS_H */

@@ -383,6 +383,16 @@ http_lookup_header (register const char *str, register size_t len)
 }
 #line 181 "HTTP_fields.gperf"
 
+struct header_hashset {
+    /* a buffer containing all header values, pointed to by elements in @arr */
+    char value_storage[REQ_HEADER_VALUES_MAX_SIZE];
+    /* an array containing pointers to the value of each header. the value is
+     * stored in @value_storage */
+    struct header_value *arr;
+    /* pointer to where in value_storage values can be inserted */
+    char *value_storage_ptr;
+};
+
 const size_t arr_len  = MAX_HASH_VALUE;
 const size_t arr_size = arr_len * sizeof(struct header_value);
 
@@ -409,15 +419,14 @@ extern inline void free_header_hashset(struct header_hashset *set) {
     free(set);
 }
 
-char *http_get_header(struct header_hashset *set, const char *name,
-                      int name_len, int *value_len) {
+struct header_value *http_get_header(struct header_hashset *set,
+                                     const char *name, int name_len) {
     if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
 
         unsigned int key = http_hash_header(name, name_len);
 
         if ( key <= MAX_HASH_VALUE ) {
-            *value_len = set->arr[key].value_len;
-            return set->arr[key].value; // success
+            return &set->arr[key];
         }
     }
     return NULL; // invalid header

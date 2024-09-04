@@ -1,5 +1,6 @@
 #include "event_loop.h"
 #include "headers.h"
+#include "parser.h"
 #include "queue.h"
 #include "status_codes.h"
 #ifdef _WIN32
@@ -29,31 +30,6 @@
 #define SOCKET_ERROR          -1
 #define MAX_BUF_SIZE_EXCEEDED 2
 
-enum http_req_props {
-    HTTP_BAD_REQ          = -1,
-    HTTP_INCOMPLETE_REQ   = -2,
-    HTTP_ENTITY_TOO_LARGE = -3,
-};
-
-enum http_header_props {
-    MAX_NUM_HEADERS          = 100,
-    HEADER_VALUE_VALID       = 2,
-    HEADER_EXISTS            = 4,
-    HEADER_VALUE_EXCEEDS_MAX = 8,
-};
-
-enum http_method {
-    M_GET,
-    M_HEAD,
-    M_POST,
-    M_PUT,
-    M_DELETE,
-    M_CONNECT,
-    M_OPTIONS,
-    M_TRACE,
-    UNKNOWN,
-};
-
 typedef struct {
     /* pointers to the method and path in original client recv buf */
     const char      *path;
@@ -77,10 +53,10 @@ struct send_buffer {
 };
 
 struct recv_buffer {
-    char      *buffer;
-    ev_ssize_t bytes_parsed, bytes_received;
-    size_t     capacity;
-    bool       headers_parsed, content_parsed;
+    char  *buffer;
+    size_t bytes_parsed, bytes_received;
+    size_t capacity;
+    bool   headers_parsed, content_parsed;
 };
 
 struct client_data {

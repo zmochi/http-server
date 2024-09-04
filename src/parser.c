@@ -38,7 +38,7 @@ enum http_method get_method_code(const char *method) {
             return known_method.method_code;
     }
 
-    return UNKNOWN;
+    return M_UNKNOWN;
 }
 
 int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,

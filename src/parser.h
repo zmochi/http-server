@@ -19,7 +19,7 @@ enum http_method {
     M_CONNECT,
     M_OPTIONS,
     M_TRACE,
-    UNKNOWN,
+    M_UNKNOWN,
 };
 
 /** TODO: fix documentation

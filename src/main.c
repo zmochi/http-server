@@ -19,16 +19,9 @@
 static config         server_conf;
 static struct timeval CLIENT_TIMEOUT;
 
-#define DFLT_TIMEOUT {.tv_sec = 5, .tv_usec = 0}
+#define CRLF "\r\n"
 
-#define CHECK_CORRUPT_CALL(con_data, sockfd)                                   \
-    {                                                                          \
-        if ( con_data->event->sockfd != sockfd ) {                             \
-            LOG_ERR("critical: con_data socket and callback sockfd are not "   \
-                    "equal!");                                                 \
-            exit(1);                                                           \
-        }                                                                      \
-    }
+#define DFLT_TIMEOUT {.tv_sec = 5, .tv_usec = 0}
 
 typedef enum {
     RECV_NODATA,
@@ -601,9 +594,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     buflen = new_send_buf->capacity;
 
-    const char *HTTP_RESPONSE_BASE_FMT = "HTTP/1.%d %d %s\r\n"
-                                         "Server: %s\r\n"
-                                         "Date: %s\r\n";
+    const char *HTTP_RESPONSE_BASE_FMT =
+        "HTTP/1.%d %d %s" CRLF "Server: %s" CRLF "Date: %s" CRLF;
 
     ret =
         snprintf(new_send_buf->buffer, buflen, HTTP_RESPONSE_BASE_FMT,
@@ -652,10 +644,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
     bytes_written += ret;
 
     // TODO: realloc buffer is capacity is not big enough
-    char *HEADERS_END_FMT = "\r\n";
-    memcpy(new_send_buf->buffer + bytes_written, HEADERS_END_FMT,
-           strlen(HEADERS_END_FMT));
-    bytes_written += strlen(HEADERS_END_FMT);
+    memcpy(new_send_buf->buffer + bytes_written, CRLF, strlen(CRLF));
+    bytes_written += strlen(CRLF);
 
     /* append HTTP message */
     if ( message_exists ) {

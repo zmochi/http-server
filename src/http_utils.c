@@ -65,8 +65,7 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
         if ( ret > eff_bufcap ) { // out of memory, capacity too small
             return NO_MEM_ERR;
         } else if ( ret < 0 ) {
-            LOG_ERR("snprintf: headers: %s", strerror(errno));
-            exit(1);
+            LOG_ABORT("snprintf: headers: %s", strerror(errno));
         }
 
         bytes_written += ret;
@@ -100,8 +99,7 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     /* read fread return value into an appropriate type: */
     ret_size_t = fread(buf + last, sizeof(char), capacity - last, file);
     if ( ret_size_t > EV_SSIZE_MAX ) {
-        LOG_ERR("fread: file contains more data than ssize_t can handle");
-        exit(1);
+        LOG_ABORT("fread: file contains more data than ssize_t can handle");
     }
     /* return value of fread fits in ssize_t, cast it: */
     ret = ret_size_t;
@@ -115,8 +113,7 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
             *total_read += ret;
             return FILE_EOF;
         } else {
-            LOG_ERR("unknown error");
-            exit(1);
+            LOG_ABORT("unknown error");
         }
     }
 

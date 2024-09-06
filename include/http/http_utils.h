@@ -10,6 +10,7 @@
 /* ##__VA_ARGS__ requires compiling with gcc or clang */
 #define LOG(fmt, ...)                                                          \
     printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
+
 #define LOG_ERR(fmt, ...)                                                      \
     fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
             ##__VA_ARGS__)

@@ -134,8 +134,7 @@ int ev_init_loop(struct event_loop *ev_loop) {
 
     status = event_base_loop(event_loop_base, EVLOOP_NO_EXIT_ON_EMPTY);
     if ( status == -1 ) {
-        LOG_ERR("event_base_loop: couldn't start event loop");
-        exit(1);
+        LOG_ABORT("event_base_loop: couldn't start event loop");
     }
 
     event_free(event_accept);
@@ -259,15 +258,13 @@ struct event *add_event(struct event_base *base, socket_t socket,
     ev = event_new(base, sock, libevent_flags, callback_fn, arg);
 
     if ( !ev ) {
-        LOG_ERR("event_new: error");
-        exit(1);
+        LOG_ABORT("event_new: error");
     }
 
     status = event_add(ev, timeout);
 
     if ( status == -1 ) {
-        LOG_ERR("event_add: error");
-        exit(1);
+        LOG_ABORT("event_add: error");
     }
 
     return ev;

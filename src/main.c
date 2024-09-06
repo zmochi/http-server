@@ -8,7 +8,7 @@
 #include <http/queue.h>
 #include <http/status_codes.h>
 
-/* internal libs: */
+/* external libs: */
 #include <event2/util.h>
 
 /* for log10() function used in http_respond_fallback */
@@ -52,8 +52,7 @@ void             send_cb(socket_t sockfd, int flags, void *arg);
  * After the connection is established (via `accept()` and the accept_cb()
  * callback function), the client may send data. This function receives the
  * data and calls the function that handles the HTTP request's method. Signature
- * matches the required signature for callback function in documentation of
- * `event_new()`.
+ * of `ev_callback_fn` from event_loop.h
  * @param sockfd socket of connection
  * @param flags bitmask of event_loop.h flags, currently has no use and is
  * always 0
@@ -124,8 +123,7 @@ int init_server(config conf) {
 
     server_conf = conf;
     if ( !is_conf_valid(conf) ) {
-        LOG_ERR("server configuration invalid");
-        exit(1);
+        LOG_ABORT("server configuration invalid");
     }
 
     socket_t main_sockfd = local_socket_bind_listen(server_conf.PORT);
@@ -225,15 +223,13 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
     if ( !(con_data->request == NULL) )
         free(con_data->request);
     else {
-        LOG_ERR("critical: request is NULL");
-        exit(EXIT_FAILURE);
+        LOG_ABORT("critical: request is NULL");
     }
 
     if ( !(con_data == NULL) )
         free(con_data);
     else {
-        LOG_ERR("critical: con_data is NULL");
-        exit(EXIT_FAILURE);
+        LOG_ABORT("critical: con_data is NULL");
     }
     printf("\n");
 }
@@ -274,8 +270,7 @@ void send_cb(socket_t sockfd, int flags, void *arg) {
         // not everything was sent
         peek_send_buf(&con_data->send_queue)->bytes_sent += nbytes;
     } else {
-        LOG_ERR("unknown error while sending data");
-        exit(1);
+        LOG_ABORT("unknown error while sending data");
     }
 
     LOG("sent!");
@@ -326,6 +321,8 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 static inline int parse_request(struct client_data *con_data,
                                 struct http_header *headers_arr,
                                 size_t              headers_arr_cap) {
+    con_data->request->num_headers = headers_arr_cap;
+
     int status = http_parse_request(
         con_data->recv_buf->buffer, con_data->recv_buf->bytes_received,
         &con_data->request->method, &con_data->request->path,
@@ -375,8 +372,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
             break;
 
         default:
-            LOG_ERR("critical: unknown return value from recv_data()");
-            exit(1);
+            LOG_ABORT("critical: unknown return value from recv_data()");
     }
 
     LOG("received data %.20s", con_data->recv_buf->buffer);
@@ -387,9 +383,9 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
          * @headers array with pointers to the HTTP headers and
          * their values in the original request */
         struct http_header headers[MAX_NUM_HEADERS];
-        /* must be initialized to capacity of @headers, after http_parse_request
-         * returns its value is changed to the actual nyumber of headers */
-        size_t num_headers = MAX_NUM_HEADERS;
+        /* must be initialized to capacity of @headers, after parse_request
+         * returns its value is changed to the actual number of headers */
+        size_t num_headers = ARR_SIZE(headers);
         status             = parse_request(con_data, headers, num_headers);
 
         switch ( status ) {
@@ -405,10 +401,9 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
                 break;
 
             default:
-                LOG_ERR(
+                LOG_ABORT(
                     "recv_cb: unexpected return value from http_parse_request. "
                     "terminating server");
-                exit(EXIT_FAILURE);
         }
 
         // statusline + headers are complete:
@@ -607,8 +602,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
          * increasing the initial capacity, so just exit */
         exit(EXIT_FAILURE);
     } else if ( ret < 0 ) {
-        LOG_ERR("http_respond: snprintf: base_fmt: %s", strerror(errno));
-        exit(1);
+        LOG_ABORT("http_respond: snprintf: base_fmt: %s", strerror(errno));
     }
 
     bytes_written += ret;
@@ -634,8 +628,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
                 return MAX_BUF_SIZE_EXCEEDED;
             }
         } else if ( ret < -1 ) {
-            LOG_ERR("copy_headers_to_buf: unknown return value");
-            exit(1);
+            LOG_ABORT("copy_headers_to_buf: unknown return value");
         }
     }
 
@@ -649,8 +642,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
     if ( message_exists ) {
         if ( response->message_len > new_send_buf->capacity - bytes_written ) {
             // TODO: realloc buffer
-            LOG_ERR("reached unimplemented code");
-            exit(1);
+            LOG_ABORT("reached unimplemented code");
         }
 
         memcpy(new_send_buf->buffer + bytes_written, response->message,
@@ -735,11 +727,9 @@ void http_respond_builtin_status(struct client_data *con_data,
 
     if ( ret == -1 && fclose(msg_file) != 0 ) {
         /* reached EOF, failed closing msg_file */
-        LOG_ERR("fclose: %s", strerror(errno));
-        exit(1);
+        LOG_ABORT("fclose: %s", strerror(errno));
     } else if ( ret <= -2 ) {
-        LOG_ERR("error in load_file_to_buf");
-        exit(1);
+        LOG_ABORT("error in load_file_to_buf");
     }
 
 /* gets base 10 number of digits in a natural number */

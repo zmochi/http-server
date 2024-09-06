@@ -3,7 +3,7 @@
 #ifndef __HEADERS_H
 #define __HEADERS_H
 
-#include "../libs/picohttpparser/picohttpparser.h"
+#include <picohttpparser/picohttpparser.h>
 #include <stdbool.h>
 
 struct http_header {

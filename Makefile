@@ -3,14 +3,15 @@
 
 #LIBEVENT_LIB_FLAGS := `pkg-config --libs libevent`
 LIBEVENT_C_FLAGS := `pkg-config --libs --cflags libevent`
-LIB_FLAGS = -L$(LIB_DIR) -lpicohttpparser $(LIBEVENT_C_FLAGS)
+LIB_FLAGS = -I$(LIB_DIR) -I$(INCLUDE_DIR) -L$(LIB_DIR) -lpicohttpparser $(LIBEVENT_C_FLAGS)
 SHARED_LIB_FILES = $(LIB_DIR)/libpicohttpparser.a
 CFLAGS = $(LIB_FLAGS) $(OPT)
 
 SRC_DIR = src
-H_DIR = src
+H_DIR = $(INCLUDE_DIR)/http
 O_DIR = obj
 LIB_DIR = libs
+INCLUDE_DIR = include
 
 EXECUTABLE_NAME = ./start_server
 MAIN_NAME = config.c

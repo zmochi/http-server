@@ -31,7 +31,7 @@
 
 #line 2 "HTTP_fields.gperf"
 
-#include "headers.h"
+#include <http/headers.h>
 #include <stdlib.h>
 #include <string.h>
 

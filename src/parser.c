@@ -1,10 +1,10 @@
-#include "parser.h"
-#include "headers.h"
-#include "http_utils.h"
+#include <http/headers.h>
+#include <http/http_utils.h>
+#include <http/parser.h>
 /* for struct client_data, enum http_method, enum http_header_props */
 
 /* for struct phr_header */
-#include "../libs/picohttpparser/picohttpparser.h"
+#include <picohttpparser/picohttpparser.h>
 
 #include <string.h>
 

@@ -1,5 +1,5 @@
-#include "../libs/boost/CURRENT_FUNCTION.hpp"
-#include "headers.h"
+#include <boost/CURRENT_FUNCTION.hpp>
+#include <http/headers.h>
 
 #include <event2/util.h>
 #include <stdio.h>
@@ -14,22 +14,28 @@
     fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
             ##__VA_ARGS__)
 
-#define HANDLE_ALLOC_FAIL()                                                    \
-    {                                                                          \
-        LOG_ERR("Allocation failed in function %s at line %d",                 \
-                BOOST_CURRENT_FUNCTION, __LINE__);                             \
+#define LOG_ABORT(fmt, ...)                                                    \
+    do {                                                                       \
+        LOG_ERR(fmt, ##__VA_ARGS__);                                           \
         exit(1);                                                               \
-    }
+    } while ( 0 )
+
+#define HANDLE_ALLOC_FAIL()                                                    \
+    do {                                                                       \
+        LOG_ABORT("Allocation failed at line %d", __LINE__);                   \
+    } while ( 0 )
 
 /* exit() call should not be removed here, will break code */
 #define LOGIC_ERR(err_fmt, ...)                                                \
-    {                                                                          \
+    do {                                                                       \
         LOG_ERR(err_fmt, ##__VA_ARGS__);                                       \
         exit(1);                                                               \
-    }
+    } while ( 0 )
 
 #define _VALIDATE_LOGIC(logic_cnd, err_msg, ...)                               \
-    if ( !(logic_cnd) ) LOGIC_ERR(err_msg, ##__VA_ARGS__);
+    do {                                                                       \
+        if ( !(logic_cnd) ) LOGIC_ERR(err_msg, ##__VA_ARGS__);                 \
+    } while ( 0 )
 
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))

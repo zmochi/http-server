@@ -383,6 +383,7 @@ http_lookup_header (register const char *str, register size_t len)
 }
 #line 181 "HTTP_fields.gperf"
 
+
 struct header_hashset {
     /* a buffer containing all header values, pointed to by elements in @arr */
     char value_storage[REQ_HEADER_VALUES_MAX_SIZE];
@@ -425,7 +426,8 @@ struct header_value *http_get_header(struct header_hashset *set,
 
         unsigned int key = http_hash_header(name, name_len);
 
-        if ( key <= MAX_HASH_VALUE ) {
+        if ( key <= MAX_HASH_VALUE && set->arr[key].value != NULL &&
+             set->arr[key].value_len != 0 ) {
             return &set->arr[key];
         }
     }

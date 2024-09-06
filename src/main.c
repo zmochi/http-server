@@ -318,6 +318,16 @@ int http_handle_incomplete_req(struct client_data *con_data) {
     return EXIT_SUCCESS;
 }
 
+/**
+ * @brief parses request that starts at @con_data->recv_buf->buffer, with length
+ * @con_data->recv_buf->bytes_received and fills @con_data->request with
+ * necessary information.
+ *
+ * @param con_data connection data to parse from and to
+ * @param headers_arr headers array to fill with request headers
+ * @param headers_arr_cap capactiy of headers array
+ * @return one of `enum http_req_props` from parser.h
+ */
 static inline int parse_request(struct client_data *con_data,
                                 struct http_header *headers_arr,
                                 size_t              headers_arr_cap) {
@@ -397,7 +407,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
                 http_handle_incomplete_req(con_data);
                 return;
 
-            case EXIT_SUCCESS:
+            case HTTP_OK:
                 break;
 
             default:
@@ -408,7 +418,8 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
 
         // statusline + headers are complete:
         // populate headers hashmap
-        populate_headers_map(con_data->request->headers, headers, num_headers);
+        populate_headers_map(con_data->request->headers, headers,
+                             con_data->request->num_headers);
         con_data->recv_buf->headers_parsed = true;
     }
 

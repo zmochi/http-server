@@ -43,8 +43,8 @@ static inline struct send_buffer *peek_send_buf(struct queue *queue) {
 
 struct addrinfo *get_local_addrinfo(const char *port);
 int              local_socket_bind_listen(const char *port);
-void             accept_cb(socket_t, short, void *);
-void             send_cb(socket_t sockfd, short flags, void *arg);
+void             accept_cb(socket_t sockfd, int flags, void *arg);
+void             send_cb(socket_t sockfd, int flags, void *arg);
 
 /**
  * @brief Callback function to read data sent from client.
@@ -54,8 +54,30 @@ void             send_cb(socket_t sockfd, short flags, void *arg);
  * data and calls the function that handles the HTTP request's method. Signature
  * matches the required signature for callback function in documentation of
  * `event_new()`.
+ * @param sockfd socket of connection
+ * @param flags bitmask of event_loop.h flags, currently has no use and is
+ * always 0
+ * @param arg ptr to struct client_data of connection, set in accept_cb
  */
-void recv_cb(socket_t, short, void *);
+void recv_cb(socket_t sockfd, int flags, void *args);
+
+/**
+ * @brief Callback function that handles closing connections
+ *
+ * This callback is either triggered manually via the event loop API (see
+ * event_loop.h) using event_wake(), or triggered automatically when the
+ * connection times out. If triggered manually, closes connection only once all
+ * queued data was sent. If timed out, discards all data to be sent and closes
+ * the connection.
+ *
+ * @param sockfd socket of connection
+ * @param flags a bitmask of flags of type `enum ev_flags` defined in
+ * `event_loop.h`. SERV_CON_CLOSE indicates server is initiating the
+ * termination, CLIENT_CON_CLOSE indicates the client has already closed the
+ * connection, and TIMEOUT indicates the connection timed out.
+ * @param arg ptr to struct client_data of connection, set in accept_cb
+ */
+void close_con_cb(socket_t sockfd, int flags, void *arg);
 
 /**
  * @brief Receives pending data in @sockfd into the recv buffer in @con_data
@@ -69,32 +91,20 @@ void recv_cb(socket_t, short, void *);
  */
 int recv_data(socket_t sockfd, struct client_data *con_data);
 
-/**
- * @brief Callback function that handles closing connections
- *
- * This callback is either triggered manually via libevent's API
- * (event_active()) or triggered automatically when the connection times out.
- * If triggered manually, closes connection only once all queued data was sent.
- * If timed out, discards all data to be sent and closes the connection.
- *
- * @param sockfd socket of connection
- * @param flags libevent flags
- * @param arg struct client_data of connection
- */
-void close_con_cb(socket_t sockfd, short flags, void *arg);
-
 int  http_respond(struct client_data *con_data, http_res *response);
 void http_respond_builtin_status(struct client_data *con_data,
                                  http_status_code    status_code,
                                  int                 http_res_flags);
+
 static inline int parse_request(struct client_data *con_data,
                                 struct http_header *headers_arr,
                                 size_t              headers_arr_capstruct);
 static inline int parse_content(struct client_data *con_data,
                                 struct header_value content_len_header,
                                 size_t             *content_len);
-static void       reset_http_req(http_req *request);
-int               terminate_connection(struct client_data *con_data, int flags);
+
+static void reset_http_req(http_req *request);
+int         terminate_connection(struct client_data *con_data, int flags);
 struct client_data *init_client_data(socket_t socket);
 
 bool finished_sending(struct client_data *con_data);
@@ -138,7 +148,7 @@ int init_server(config conf) {
     return EXIT_SUCCESS;
 }
 
-void accept_cb(socket_t sockfd, short flags, void *event_loop_data) {
+void accept_cb(socket_t sockfd, int flags, void *event_loop_data) {
     // sockaddr big enough for either IPv4 or IPv6
     // contains info about connection
     struct sockaddr_storage *sockaddr =
@@ -167,19 +177,7 @@ void accept_cb(socket_t sockfd, short flags, void *event_loop_data) {
     free(sockaddr);
 }
 
-/**
- * @brief callback function for when a connection times out OR when connection
- * should be closed manually (using libevent's event_active() to trigger this
- * manually)
- *
- * @param sockfd socket of connection
- * @param flags a bitmask of flags of type `enum ev_flags` defined in
- * `event_loop.h`. SERV_CON_CLOSE indicates server is initiating the
- * termination, CLIENT_CON_CLOSE indicates the client has already closed the
- * connection, and TIMEOUT indicates the connection timed out.
- * @param arg ptr to struct client_data of connection
- */
-void close_con_cb(socket_t sockfd, short flags, void *arg) {
+void close_con_cb(socket_t sockfd, int flags, void *arg) {
     LOG();
     struct client_data *con_data   = (struct client_data *)arg;
     struct recv_buffer *recv_buf   = con_data->recv_buf;
@@ -240,7 +238,7 @@ void close_con_cb(socket_t sockfd, short flags, void *arg) {
     printf("\n");
 }
 
-void send_cb(socket_t sockfd, short flags, void *arg) {
+void send_cb(socket_t sockfd, int flags, void *arg) {
     LOG("send_cb");
 
     struct client_data *con_data = (struct client_data *)arg;
@@ -350,7 +348,7 @@ static inline int parse_content(struct client_data *con_data,
         MAX_RECV_BUFFER_SIZE - con_data->recv_buf->bytes_received, content_len);
 }
 
-void recv_cb(socket_t sockfd, short flags, void *arg) {
+void recv_cb(socket_t sockfd, int flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
     size_t             *bytes_parsed   = &con_data->recv_buf->bytes_parsed;

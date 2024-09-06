@@ -12,7 +12,7 @@
 
 typedef evutil_socket_t socket_t;
 
-typedef void (*ev_callback_fn)(socket_t socket, short flags, void *arg);
+typedef void (*ev_callback_fn)(socket_t socket, int flags, void *arg);
 
 /* flags to pass to libevent when calling event_new, for each possible type of
  * event relevant for the HTTP server */
@@ -27,7 +27,7 @@ enum ev_type {
 /* flags that an event callback can receive, must be set from left otherwise
  * they collide with event loop library flags */
 enum ev_flags {
-    /* enums are guaranteed to have max size of int, smaller than short */
+    /* enums are guaranteed to have max size of int, bigger than short */
     TIMEOUT = SET_LEFTMOST_SHORT_BIT(0), /* should not be passed manually. this
                 is an event loop indication of timeout */
     SERV_CON_CLOSE   = SET_LEFTMOST_SHORT_BIT(1),
@@ -57,8 +57,7 @@ struct event_loop {
 /**
  * @brief initializes an event loop
  *
- * @param ev `struct event_loop` to initialize
- * @param arg argument to pass to new_conn_cb
+ * @param ev allocated `struct event_loop` to initialize
  * @return 0 on success, 1 on failure
  */
 int ev_init_loop(struct event_loop *ev);

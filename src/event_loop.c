@@ -27,8 +27,19 @@ struct conn_data {
     void *user_cb_arg;
 };
 
+/**
+ * @brief adds event of type @ev_type to a libevent event loop @base. for
+ * internal use only.
+ *
+ * @param base libevent event_base to add event to
+ * @param socket socket to monitor event on
+ * @param ev_type **one** of `enum ev_type`
+ * @param callback_fn one of the internal callback functions
+ * @param timeout timeout of event
+ * @param arg arg to pass to callback_fn
+ */
 struct event *add_event(struct event_base *base, socket_t socket,
-                        enum ev_type ev_type, ev_callback_fn callback_fn,
+                        enum ev_type ev_type, event_callback_fn callback_fn,
                         const struct timeval *timeout, void *arg);
 
 /**
@@ -45,7 +56,8 @@ struct event *add_event(struct event_base *base, socket_t socket,
  * if user passesd flags, they should be the flags defined in `enum ev_flags`
  *
  * @param socket socket of connection
- * @param flags libevent flags/API flags defined in `enum ev_flags`
+ * @param flags EV_TIMEOUT (passed by libevent) or user defined
+ * CLIENT_CON_CLOSE/SERV_CON_CLOSE
  * @param arg `struct event_data` ptr of user event
  */
 void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
@@ -62,6 +74,8 @@ void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
         case SERV_CON_CLOSE:
             api_flags = SERV_CON_CLOSE;
             break;
+        default:
+            LOG_ABORT("Unexpected flag. Stopping");
     }
 
     conn_data->close_conn_cb(socket, api_flags, conn_data->user_cb_arg);
@@ -71,17 +85,26 @@ void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
  * @brief see _ev_close_conn_cb documentation
  */
 void _ev_write_cb(socket_t socket, short flags, void *arg) {
-    struct conn_data *ev_data = (struct conn_data *)arg;
+    struct conn_data *conn_data = (struct conn_data *)arg;
 
-    ev_data->write_cb(socket, 0, ev_data->user_cb_arg);
+    conn_data->write_cb(socket, 0, conn_data->user_cb_arg);
 }
 
 /**
  * @brief see _ev_close_conn_cb documentation
  */
 void _ev_read_cb(socket_t socket, short flags, void *arg) {
-    struct conn_data *ev_data = (struct conn_data *)arg;
-    ev_data->read_cb(socket, 0, ev_data->user_cb_arg);
+    struct conn_data *conn_data = (struct conn_data *)arg;
+    conn_data->read_cb(socket, 0, conn_data->user_cb_arg);
+}
+
+/**
+ * @brief see _ev_close_conn_cb documentation, only here @arg is the associated
+ * `struct event_loop`
+ */
+void _ev_accept_cb(socket_t socket, short flags, void *arg) {
+    struct event_loop *ev_loop = (struct event_loop *)arg;
+    ev_loop->new_conn_cb(socket, 0, ev_loop);
 }
 
 int ev_init_loop(struct event_loop *ev_loop) {
@@ -94,7 +117,7 @@ int ev_init_loop(struct event_loop *ev_loop) {
                         ev_loop->close_conn_cb != NULL &&
                         ev_loop->new_conn_cb != NULL,
                     "all callback functions in `struct event_loop` should be "
-                    "set before calling ev_init_loop().")
+                    "set before calling ev_init_loop().");
 
     event_loop_base = event_base_new();
     catchExcp(event_loop_base == NULL, "Couldn't open event base.", 1);
@@ -107,7 +130,7 @@ int ev_init_loop(struct event_loop *ev_loop) {
      * passing event_loop_base as callback function argument here so new events
      * can be added to current even loop after new_conn_cb is called */
     event_accept = add_event(event_loop_base, listen_sockfd, EV_NEWCONN,
-                             ev_loop->new_conn_cb, NULL, ev_loop);
+                             _ev_accept_cb, NULL, ev_loop);
 
     status = event_base_loop(event_loop_base, EVLOOP_NO_EXIT_ON_EMPTY);
     if ( status == -1 ) {
@@ -177,11 +200,6 @@ void ev_remove_conn(struct conn_data *conn_data) {
 
 void event_wake(struct conn_data *ev_data, enum ev_type ev_type,
                 enum ev_flags flags) {
-    _VALIDATE_LOGIC(
-        !(flags & (EV_TIMEOUT | EV_READ | EV_WRITE | EV_SIGNAL | EV_PERSIST |
-                   EV_ET | EV_FINALIZE | EV_CLOSED)),
-        "Passed flags %d that collide with event loop library flags.", flags)
-
     _VALIDATE_LOGIC(ev_type != EV_SEND && ev_type != EV_NEWCONN,
                     "EV_SEND and EV_NEWCONN are always active and should not "
                     "be manually woken up.");
@@ -208,7 +226,7 @@ void event_wake(struct conn_data *ev_data, enum ev_type ev_type,
 }
 
 struct event *add_event(struct event_base *base, socket_t socket,
-                        enum ev_type ev_type, ev_callback_fn callback_fn,
+                        enum ev_type ev_type, event_callback_fn callback_fn,
                         const struct timeval *timeout, void *arg) {
     struct event   *ev;
     socket_t        sock = socket;
@@ -235,7 +253,7 @@ struct event *add_event(struct event_base *base, socket_t socket,
             libevent_flags = EV_READ | EV_PERSIST;
             break;
         default:
-            LOGIC_ERR("Passed non-existent event type.")
+            LOGIC_ERR("Passed non-existent event type.");
     }
 
     ev = event_new(base, sock, libevent_flags, callback_fn, arg);
@@ -245,8 +263,6 @@ struct event *add_event(struct event_base *base, socket_t socket,
         exit(1);
     }
 
-    /* technically EV_CLOSE shouldn't be added to pending events, but it's also
-     * only woken */
     status = event_add(ev, timeout);
 
     if ( status == -1 ) {

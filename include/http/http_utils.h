@@ -57,11 +57,22 @@ ev_ssize_t load_file_to_buf(FILE *file, char *buf, size_t buflen,
                             size_t *last_len);
 int        populate_headers_map(struct header_hashset *set,
                                 struct http_header headers[], size_t num_headers);
-int        http_extract_validate_header(struct header_hashset *set,
-                                        const char            *header_name,
-                                        size_t                 header_name_len,
-                                        const char            *expected_value,
-                                        size_t                 expected_value_len);
+/**
+ * @brief gets header with the given name from header hashset @set and matches
+ * its value against @expected_value.
+ *
+ * @param set hashset to extract header from
+ * @param header_name header's name
+ * @param header_name_len header's name length
+ * @param expected_value expected value to match against
+ * @param expected_value_len expected value length
+ * @return a bitmask of fields from `enum http_header_props` (from headers.h)
+ */
+int http_extract_validate_header(struct header_hashset *set,
+                                 const char            *header_name,
+                                 size_t                 header_name_len,
+                                 const char            *expected_value,
+                                 size_t                 expected_value_len);
 /**
  * @brief reallocates buffer to new size, if not exceeding max_size
  *

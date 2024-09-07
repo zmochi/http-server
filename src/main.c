@@ -30,17 +30,6 @@ typedef enum {
     SUCCESS,
 } recv_flags;
 
-static inline struct send_buffer *dequeue_send_buf(struct queue *queue) {
-    return list_entry(dequeue(queue), struct send_buffer, entry);
-}
-static inline void enqueue_send_buf(struct queue       *queue,
-                                    struct send_buffer *send_buf) {
-    enqueue(queue, &send_buf->entry);
-}
-static inline struct send_buffer *peek_send_buf(struct queue *queue) {
-    return list_entry(queue->head, struct send_buffer, entry);
-}
-
 struct addrinfo *get_local_addrinfo(const char *port);
 int              local_socket_bind_listen(const char *port);
 void             accept_cb(socket_t sockfd, int flags, void *arg);
@@ -108,6 +97,15 @@ struct client_data *init_client_data(socket_t socket);
 
 bool finished_sending(struct client_data *con_data);
 int  finished_receiving(struct client_data *con_data);
+
+static inline struct send_buffer *dequeue_send_buf(struct queue *queue);
+static inline void                enqueue_send_buf(struct queue       *queue,
+                                                   struct send_buffer *send_buf);
+static inline struct send_buffer *peek_send_buf(struct queue *queue);
+static inline void                reset_http_req(http_req *request);
+static inline int init_client_event(struct client_data *con_data);
+static inline int init_client_recv_buf(struct client_data *con_data);
+static inline int init_client_request(struct client_data *con_data);
 
 bool is_conf_valid(config conf) {
     bool handler_exists;
@@ -857,6 +855,17 @@ static inline void reset_http_req(http_req *request) {
 
     request->headers = headers;
     request->message = message_buf;
+}
+
+static inline struct send_buffer *dequeue_send_buf(struct queue *queue) {
+    return list_entry(dequeue(queue), struct send_buffer, entry);
+}
+static inline void enqueue_send_buf(struct queue       *queue,
+                                    struct send_buffer *send_buf) {
+    enqueue(queue, &send_buf->entry);
+}
+static inline struct send_buffer *peek_send_buf(struct queue *queue) {
+    return list_entry(queue->head, struct send_buffer, entry);
 }
 
 int finished_receiving(struct client_data *con_data) {

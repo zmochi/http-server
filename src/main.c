@@ -744,9 +744,10 @@ void http_respond_builtin_status(struct client_data *con_data,
 /* gets base 10 number of digits in a natural number */
 #define NUM_DIGITS(num) ((int)(log10((double)num) + 1))
 
-    struct http_header  headers[2];
-    struct http_header *content_len_header = &headers[0],
-                       *connection_header  = &headers[1];
+    struct http_header  headers[3];
+    struct http_header *content_len_header  = &headers[0],
+                       *connection_header   = &headers[1],
+                       *content_type_header = &headers[2];
 
     response.status_code = status_code;
     response.message     = file_contents_buf;
@@ -763,6 +764,8 @@ void http_respond_builtin_status(struct client_data *con_data,
         LOG_ERR("num_to_str: error in writing Content-Length header");
 
     http_header_init(content_len_header, "Content-Length", content_len_value);
+    http_header_init(content_type_header, "Content-Type",
+                     "text/html; charset=utf-8");
 
     if ( http_res_flags & SERV_CON_CLOSE ) {
         http_header_init(connection_header, "Connection", "close");

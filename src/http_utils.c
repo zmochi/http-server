@@ -138,9 +138,12 @@ int http_extract_validate_header(struct header_hashset *set,
                                  size_t header_name_len,
                                  const char *restrict expected_value,
                                  size_t expected_value_len) {
-    short                header_flags = 0;
+    short header_flags = 0;
+
     struct header_value *header_value =
         http_get_header(set, header_name, header_name_len);
+    if ( header_value == NULL ) return header_flags;
+
     char *header_value_buf = header_value->value;
     int   header_value_len = header_value->value_len;
 

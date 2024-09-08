@@ -1,30 +1,13 @@
 #include <http/headers.h>
 #include <http/http_utils.h>
 #include <http/parser.h>
+#include <http/request_response.h>
 /* for struct client_data, enum http_method, enum http_header_props */
 
 /* for struct phr_header */
 #include <picohttpparser/picohttpparser.h>
 
 #include <string.h>
-
-/* struct for associating HTTP method string with its enum code */
-struct method_str_code {
-    const char      *method_str;
-    size_t           method_strlen;
-    enum http_method method_code;
-};
-
-/* macro must match the name format in `enum http_method` */
-#define structify_method(method_name)                                          \
-    {#method_name, strlen(#method_name), M_##method_name}
-
-static struct method_str_code methods_strings[] = {
-    structify_method(GET),     structify_method(HEAD),
-    structify_method(POST),    structify_method(PUT),
-    structify_method(DELETE),  structify_method(CONNECT),
-    structify_method(OPTIONS), structify_method(TRACE),
-};
 
 enum http_method get_method_code(const char *method) {
     struct method_str_code known_method;
@@ -80,6 +63,7 @@ enum http_req_props http_parse_content(const char *content_bufptr,
     short      content_length_header_flags;
     ev_ssize_t extracted_content_len = str_to_positive_num(
         content_len_header_value, content_len_header_valuelen);
+
     if ( extracted_content_len < 0 ) return HTTP_BAD_REQ;
 
     if ( extracted_content_len > content_bufcap ) return HTTP_ENTITY_TOO_LARGE;
@@ -105,4 +89,22 @@ enum http_req_props http_parse_content(const char *content_bufptr,
         // understand, so don't terminate on invalid header value
         con_data->recv_buf->content_parsed = true;
     } */
+}
+
+bool is_request_valid(http_req *request) {
+
+    /* special rules for HTTP 1.1 */
+    if ( request->minor_ver == 1 ) {
+        const char *HOST_HEADER_NAME = "Host";
+        /* host header is required on HTTP 1.1 */
+        short host_header_flags =
+            http_extract_validate_header(request->headers, HOST_HEADER_NAME,
+                                         strlen(HOST_HEADER_NAME), NULL, 0);
+
+        if ( !(host_header_flags & HEADER_EXISTS) ) {
+            return false;
+        }
+    }
+
+    return true;
 }

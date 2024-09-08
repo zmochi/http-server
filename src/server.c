@@ -427,23 +427,14 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         con_data->recv_buf->headers_parsed = true;
     }
 
-    /* write start address of content (message) to the http request struct in
-     * this connection */
-    con_data->request->message = con_data->recv_buf->buffer + *bytes_parsed;
-
-    /* special rules for HTTP 1.1 */
-    if ( con_data->request->minor_ver == 1 ) {
-        const char *HOST_HEADER_NAME = "Host";
-        /* host header is required on HTTP 1.1 */
-        short host_header_flags = http_extract_validate_header(
-            con_data->request->headers, HOST_HEADER_NAME,
-            strlen(HOST_HEADER_NAME), NULL, 0);
-
-        if ( !(host_header_flags & HEADER_EXISTS) ) {
-            http_respond_builtin_status(con_data, Bad_Request, 0);
-            return;
-        }
+    if ( !is_request_valid(con_data->request) ) {
+        http_respond_builtin_status(con_data, Bad_Request, 0);
+        return;
     }
+
+    /* write start address of content (message) to the http request struct
+     */
+    con_data->request->message = con_data->recv_buf->buffer + *bytes_parsed;
 
     /* continue parsing HTTP message content (or begin parsing if this is the
      * first time) */
@@ -491,7 +482,6 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         return;
     }
 
-    http_respond(con_data, &response);
     status = http_respond(con_data, &response);
     switch ( status ) {
         case SUCCESS:

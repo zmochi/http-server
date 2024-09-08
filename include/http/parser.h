@@ -1,26 +1,8 @@
 #include <http/headers.h>
+#include <http/request_response.h>
 
 #ifndef __PARSER_H_
 #define __PARSER_H_
-
-enum http_req_props {
-    HTTP_OK,
-    HTTP_BAD_REQ,
-    HTTP_INCOMPLETE_REQ,
-    HTTP_ENTITY_TOO_LARGE,
-};
-
-enum http_method {
-    M_GET,
-    M_HEAD,
-    M_POST,
-    M_PUT,
-    M_DELETE,
-    M_CONNECT,
-    M_OPTIONS,
-    M_TRACE,
-    M_UNKNOWN,
-};
 
 /** TODO: fix documentation
  * @brief Calls `recv()` on `sockfd` and stored the result in `buffer`.
@@ -45,19 +27,19 @@ int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
                        size_t *bytes_parsed);
 
 /**
- * @brief Manages content in the request part of the specified `con_data`
- * Marks the content as parsed in `con_data` if the user specified
- * Content-Length is <= the number of bytes received (Assuming the headers
- * were parsed and put into the hashmap before calling this function). Sets
- * `bytes_parsed`  `con_data` to number of bytes in request if all expected
- * data arrived.
+ * @brief parses content in HTTP request, given the Content-Length header value.
+ * puts the correct size of content in @content_len parameter, or returns a
+ * status indicating some kind of failure.
  *
  * @param con_data Connection data to manage
  * @param content_bufptr pointer to start of received content
- * @param size_content_received number of bytes received in content_bufptr
+ * @param size_content_received number of bytes received from client in
+ * content_bufptr
  * @param content_len_header_value value of request Content-Len header
  * @param content_len_header_valuelen length of Content-Length value
  * @param content_len_limit maximum Content-Length header value
+ * @param content_len pointer to content_len variable, holding the content
+ * length in request
  * @return HTTP_INCOMPLETE_REQ when the Content-Length header value < bytes
  * received via recv
  * HTTP_ENTITY_TOO_LARGE when the user-specified Content-Length is bigger
@@ -70,6 +52,6 @@ enum http_req_props http_parse_content(const char *content_bufptr,
                                        const char *content_len_header_value,
                                        size_t      content_len_header_valuelen,
                                        size_t      content_len_limit,
-                                       size_t     *bytes_parsed);
+                                       size_t     *content_len);
 
 #endif /* __PARSER_H_ */

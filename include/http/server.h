@@ -1,8 +1,9 @@
-#include "event_loop.h"
-#include "headers.h"
-#include "parser.h"
-#include "queue.h"
-#include "status_codes.h"
+#include <http/event_loop.h>
+#include <http/headers.h>
+#include <http/parser.h>
+#include <http/queue.h>
+#include <http/request_response.h>
+#include <http/status_codes.h>
 #ifdef _WIN32
 #include <winsock.h>
 #else // Unix probably?
@@ -24,22 +25,6 @@
 #ifndef __MAIN_H
 #define __MAIN_H
 
-
-typedef struct {
-    /* pointers to the method and path in original client recv buf */
-    const char      *path;
-    enum http_method method;
-    /* lengths of method and path strings above */
-    size_t method_len, path_len;
-    size_t num_headers;
-    int    minor_ver;
-    /* hashset of headers of HTTP req, each headers value is copied into a
-     * buffer inside this struct and is indepedent of the recv buffer */
-    struct header_hashset *headers;
-    /* points to content of HTTP req from client */
-    char  *message;
-    size_t message_length;
-} http_req;
 #define SOCKET_ERROR -1
 
 struct send_buffer {
@@ -84,7 +69,7 @@ typedef struct {
     char          *SERVNAME;
     struct timeval timeout;
     /* generates a reponse to request.
-     *  - must use malloc() to allocate response.headers_arr, response.message
+     *  - must use malloc() to allocate http_res.headers_arr, http_res.message
      *  - must set all fields of http_res
      */
     http_res (*handler)(http_req *request);

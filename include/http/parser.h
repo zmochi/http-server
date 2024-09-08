@@ -1,8 +1,72 @@
 #include <http/headers.h>
-#include <http/request_response.h>
+
+/* for strlen() */
+#include <string.h>
 
 #ifndef __PARSER_H_
 #define __PARSER_H_
+
+enum http_req_props {
+    HTTP_OK,
+    HTTP_BAD_REQ,
+    HTTP_INCOMPLETE_REQ,
+    HTTP_ENTITY_TOO_LARGE,
+};
+
+enum http_method {
+    M_GET,
+    M_HEAD,
+    M_POST,
+    M_PUT,
+    M_DELETE,
+    M_CONNECT,
+    M_OPTIONS,
+    M_TRACE,
+    M_UNKNOWN,
+};
+
+/* struct for associating HTTP method string with its enum code */
+struct method_str_code {
+    const char      *method_str;
+    size_t           method_strlen;
+    enum http_method method_code;
+};
+
+/* macro must match the name format in `enum http_method` */
+#define structify_method(method_name)                                          \
+    {#method_name, strlen(#method_name), M_##method_name}
+
+static struct method_str_code methods_strings[] = {
+    structify_method(GET),     structify_method(HEAD),
+    structify_method(POST),    structify_method(PUT),
+    structify_method(DELETE),  structify_method(CONNECT),
+    structify_method(OPTIONS), structify_method(TRACE),
+};
+
+typedef struct {
+    /* pointers to the method and path in original client recv buf */
+    const char      *path;
+    enum http_method method;
+    int              minor_ver;
+    /* lengths of method and path strings above */
+    size_t method_len, path_len;
+    /* hashset of headers of HTTP req, each headers value is copied into a
+     * buffer inside this struct and is indepedent of the recv buffer */
+    struct header_hashset *headers;
+    size_t                 num_headers;
+    /* points to content of HTTP req from client */
+    char  *message;
+    size_t message_length;
+} http_req;
+
+/**
+ * @brief checks if request (that has everything up to its content parsed) is
+ * in-line with HTTP/1.1 specification
+ *
+ * @param request request to check against
+ * @return true if request is compliant, false otherwise
+ */
+bool is_request_HTTP_compliant(http_req *request);
 
 /** TODO: fix documentation
  * @brief Calls `recv()` on `sockfd` and stored the result in `buffer`.

@@ -1,7 +1,6 @@
 #include <http/headers.h>
 #include <http/http_utils.h>
 #include <http/parser.h>
-#include <http/request_response.h>
 /* for struct client_data, enum http_method, enum http_header_props */
 
 /* for struct phr_header */
@@ -91,7 +90,7 @@ enum http_req_props http_parse_content(const char *content_bufptr,
     } */
 }
 
-bool is_request_valid(http_req *request) {
+bool is_request_HTTP_compliant(http_req *request) {
 
     /* special rules for HTTP 1.1 */
     if ( request->minor_ver == 1 ) {

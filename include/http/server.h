@@ -2,7 +2,6 @@
 #include <http/headers.h>
 #include <http/parser.h>
 #include <http/queue.h>
-#include <http/request_response.h>
 #include <http/status_codes.h>
 #ifdef _WIN32
 #include <winsock.h>

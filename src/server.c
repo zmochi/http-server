@@ -427,7 +427,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         con_data->recv_buf->headers_parsed = true;
     }
 
-    if ( !is_request_valid(con_data->request) ) {
+    if ( !is_request_HTTP_compliant(con_data->request) ) {
         http_respond_builtin_status(con_data, Bad_Request, 0);
         return;
     }

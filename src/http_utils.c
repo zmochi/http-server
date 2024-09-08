@@ -202,11 +202,14 @@ ev_ssize_t str_to_positive_num(const char *str, size_t strlen) {
      * strtoumax, which expects a null terminated string */
     memcpy(local_str, str, strlen);
     /* terminate str with null */
-    local_str[ARR_SIZE(local_str)] = 0;
+    local_str[ARR_SIZE(local_str) - 1] = '\x00';
 
     uintmax_t content_length = strtoumax(local_str, &endptr, 10);
 
-    if ( endptr < local_str + local_strlen ) return -1;
+    if ( (ev_ssize_t)content_length < 0 ) return -1; // overflow
+
+    // TODO: verify this is not dumb
+    if ( *endptr != '\x00' ) return -1;
 
     return content_length;
 }

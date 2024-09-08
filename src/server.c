@@ -841,6 +841,9 @@ struct client_data *init_client_data(socket_t socket) {
 
     if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
+    if ( init_queue(&con_data->send_queue) == -1 )
+        LOG_ABORT("failed initializing client send queue");
+
     con_data->close_requested = false;
 
     con_data->sockfd = socket;

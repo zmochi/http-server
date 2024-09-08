@@ -9,6 +9,15 @@ struct queue {
     struct list_item *head;
 };
 
+/**
+ * @brief initializes a queue struct @queue (currently just a placeholder that
+ * does nothing)
+ *
+ * @param queue queue to initialize
+ * @return 0 on success, -1 on failure
+ */
+static inline int init_queue(struct queue *queue) { return 0; }
+
 static inline int is_empty(struct queue *queue) { return queue->head == NULL; }
 
 static inline struct list_item *dequeue(struct queue *queue) {

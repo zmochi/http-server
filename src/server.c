@@ -23,11 +23,16 @@ static struct timeval CLIENT_TIMEOUT;
 
 #define DFLT_TIMEOUT {.tv_sec = 5, .tv_usec = 0}
 
+enum func_return_codes {
+    SUCCESS,
+    MAX_BUF_SIZE_EXCEEDED,
+};
+
 typedef enum {
     RECV_NODATA,
     CON_RESET,
     RECV_CLIENT_CLOSED_CON,
-    SUCCESS,
+    RECV_SUCCESS,
 } recv_flags;
 
 struct addrinfo *get_local_addrinfo(const char *port);
@@ -377,7 +382,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
             terminate_connection(con_data, CLIENT_CON_CLOSE);
             return;
 
-        case SUCCESS:
+        case RECV_SUCCESS:
             break;
 
         default:
@@ -487,6 +492,15 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
     }
 
     http_respond(con_data, &response);
+    status = http_respond(con_data, &response);
+    switch ( status ) {
+        case SUCCESS:
+            break; // success
+
+        case MAX_BUF_SIZE_EXCEEDED:
+            // TODO handle this error
+            LOG_ABORT("max buffer size exceeded while building response");
+    }
 
     const char *CONNECTION_HEADER_NAME = "Connection";
     const char *CONNECTION_CLOSE_VALUE = "close";
@@ -545,7 +559,7 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
     }
 
     recv_buf->bytes_received += nbytes;
-    return SUCCESS;
+    return RECV_SUCCESS;
 }
 
 struct send_buffer *malloc_init_send_buf(size_t capacity) {
@@ -667,7 +681,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
     enqueue_send_buf(&con_data->send_queue, new_send_buf);
 
-    return 0;
+    return SUCCESS;
 }
 
 /**
@@ -779,6 +793,9 @@ void http_respond_builtin_status(struct client_data *con_data,
     free(file_contents_buf);
 
     switch ( status ) {
+        case SUCCESS:
+            break; // success
+
         /* if response exceeds max send buffer size: */
         case MAX_BUF_SIZE_EXCEEDED:
             LOG_ERR("response with status code %d exceeds maximum buffer "

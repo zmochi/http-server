@@ -24,11 +24,6 @@
 #ifndef __MAIN_H
 #define __MAIN_H
 
-// all sizes are in bytes
-/* avoid 0 and 1 values since they're used to indicate general success/failure
- */
-#define SOCKET_ERROR          -1
-#define MAX_BUF_SIZE_EXCEEDED 2
 
 typedef struct {
     /* pointers to the method and path in original client recv buf */
@@ -45,6 +40,7 @@ typedef struct {
     char  *message;
     size_t message_length;
 } http_req;
+#define SOCKET_ERROR -1
 
 struct send_buffer {
     char            *buffer;

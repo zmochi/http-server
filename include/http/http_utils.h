@@ -7,6 +7,22 @@
 #ifndef __HTTP_UTILS_H
 #define __HTTP_UTILS_H
 
+#ifdef DEBUG
+
+/* ##__VA_ARGS__ requires compiling with gcc or clang */
+#define LOG_DEBUG(fmt, ...)                                                    \
+    printf("DEBUG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
+
+#define LOG_ERR_DEBUG(fmt, ...)                                                \
+    fprintf(stderr, "DEBUG: ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,     \
+            ##__VA_ARGS__)
+#else
+
+#define LOG_DEBUG(fmt, ...)     ((void)0)
+#define LOG_ERR_DEBUG(fmt, ...) ((void)0)
+
+#endif
+
 /* ##__VA_ARGS__ requires compiling with gcc or clang */
 #define LOG(fmt, ...)                                                          \
     printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)

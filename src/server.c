@@ -1,4 +1,4 @@
-#include <http/main.h>
+#include <http/server.h>
 /* defines socket_t */
 #include <http/event_loop.h>
 #include <http/headers.h>
@@ -164,7 +164,7 @@ void accept_cb(socket_t sockfd, int flags, void *event_loop_data) {
 
     evutil_make_socket_nonblocking(incoming_sockfd);
 
-    LOG("allocating con_data");
+    LOG_DEBUG("allocating con_data");
     struct client_data *con_data = init_client_data(incoming_sockfd);
     /* event loop to init event on, event to init, arg to pass to callbacks
      */
@@ -174,7 +174,7 @@ void accept_cb(socket_t sockfd, int flags, void *event_loop_data) {
 }
 
 void close_con_cb(socket_t sockfd, int flags, void *arg) {
-    LOG();
+    LOG_DEBUG();
     struct client_data *con_data   = (struct client_data *)arg;
     struct recv_buffer *recv_buf   = con_data->recv_buf;
     struct queue       *send_queue = &con_data->send_queue;
@@ -184,10 +184,10 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
     bool client_closed_con      = flags & CLIENT_CON_CLOSE;
     bool unsent_data_exists     = !is_empty(send_queue);
 
-    if ( timed_out ) LOG("timed_out");
-    if ( unsent_data_exists ) LOG("unsent_data_exis");
-    if ( client_closed_con ) LOG("client_closed_con");
-    if ( server_close_requested ) LOG("server_close_requested");
+    if ( timed_out ) LOG_DEBUG("timed_out");
+    if ( unsent_data_exists ) LOG_DEBUG("unsent_data_exis");
+    if ( client_closed_con ) LOG_DEBUG("client_closed_con");
+    if ( server_close_requested ) LOG_DEBUG("server_close_requested");
     /* failsafe: don't close connection if close wasn't requested, client didn't
      * close connection or connection didn't timeout */
     if ( !(server_close_requested || client_closed_con || timed_out) ) {
@@ -202,7 +202,7 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
         return;
     }
 
-    LOG("closing connection");
+    LOG_DEBUG("closing connection");
 
     if ( recv_buf == NULL )
         LOG_ERR("critical: recv_buf is NULL when connection is closed");
@@ -233,7 +233,7 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
 }
 
 void send_cb(socket_t sockfd, int flags, void *arg) {
-    LOG("send_cb");
+    LOG_DEBUG("send_cb");
 
     struct client_data *con_data = (struct client_data *)arg;
 
@@ -243,7 +243,7 @@ void send_cb(socket_t sockfd, int flags, void *arg) {
 
     if ( is_send_queue_empty ) {
         /* nothing to send */
-        LOG("nothing to send");
+        LOG_DEBUG("nothing to send");
         return;
     }
 
@@ -271,7 +271,7 @@ void send_cb(socket_t sockfd, int flags, void *arg) {
         LOG_ABORT("unknown error while sending data");
     }
 
-    LOG("sent!");
+    LOG_DEBUG("sent!");
 }
 
 bool finished_sending(struct client_data *con_data) {
@@ -290,7 +290,7 @@ bool finished_sending(struct client_data *con_data) {
 }
 
 int http_handle_incomplete_req(struct client_data *con_data) {
-    LOG(":)");
+    LOG_DEBUG(":)");
     /* TODO circular recv: shouldn't resize buffer every time in circular buffer
      */
     int status;
@@ -365,14 +365,15 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
     status = recv_data(sockfd, con_data);
     switch ( status ) {
         case RECV_NODATA:
-            LOG_ERR("suspicious: No data to receive on an open connection even "
-                    "though libevent triggered a read event");
+            LOG_ERR_DEBUG(
+                "suspicious: No data to receive on an open connection even "
+                "though libevent triggered a read event");
             return;
 
         case CON_RESET:
-            LOG("client forcibly closed connection");
+            LOG_DEBUG("client forcibly closed connection");
         case RECV_CLIENT_CLOSED_CON:
-            LOG("client gracefully closed connection");
+            LOG_DEBUG("client gracefully closed connection");
             terminate_connection(con_data, CLIENT_CON_CLOSE);
             return;
 
@@ -383,7 +384,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
             LOG_ABORT("critical: unknown return value from recv_data()");
     }
 
-    LOG("received data %.20s", con_data->recv_buf->buffer);
+    LOG_DEBUG("received data %.20s", con_data->recv_buf->buffer);
 
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
@@ -471,9 +472,9 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
             break;
 
         default:
-            LOG_ERR("recv_cb: unexpected return value from http_parse_content. "
-                    "terminating server");
-            exit(EXIT_FAILURE);
+            LOG_ABORT(
+                "recv_cb: unexpected return value from http_parse_content. "
+                "terminating server");
     }
 
     con_data->recv_buf->content_parsed = true;
@@ -536,9 +537,8 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
                 return RECV_NODATA;
 
             default:
-                LOG_ERR("critical: %s",
-                        evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-                exit(1);
+                LOG_ABORT("critical: %s",
+                          evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
         }
     } else if ( nbytes == 0 ) {
         return RECV_CLIENT_CLOSED_CON;
@@ -605,11 +605,10 @@ int http_respond(struct client_data *con_data, http_res *response) {
                  stringify_statuscode(status_code), server_conf.SERVNAME, date);
 
     if ( ret >= buflen ) {
-        LOG_ERR("http_respond: Initial capacity of send buffer is not big "
-                "enough for the base HTTP response format");
+        LOG_ABORT("http_respond: Initial capacity of send buffer is not big "
+                  "enough for the base HTTP response format");
         /* this really shouldn't happen and is permanently fixable by simply
          * increasing the initial capacity, so just exit */
-        exit(EXIT_FAILURE);
     } else if ( ret < 0 ) {
         LOG_ABORT("http_respond: snprintf: base_fmt: %s", strerror(errno));
     }
@@ -683,7 +682,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
 void http_respond_builtin_status(struct client_data *con_data,
                                  http_status_code    status_code,
                                  int                 http_res_flags) {
-    LOG();
+    LOG_DEBUG();
     http_res     response;
     size_t       init_file_content_cap = INIT_SEND_BUFFER_CAPACITY;
     const size_t MAX_FILE_READ_SIZE    = 1 << 27;
@@ -708,14 +707,13 @@ void http_respond_builtin_status(struct client_data *con_data,
               "filename to buffer\n",
               1);
 
-    LOG("sending error from filename: %s", message_filepath);
+    LOG_DEBUG("sending error from filename: %s", message_filepath);
 
     content_len    = 0;
     FILE *msg_file = fopen(message_filepath, "r");
     if ( !msg_file ) {
-        LOG_ERR("attempted to open %s. fopen: %s", message_filepath,
-                strerror(errno));
-        exit(1);
+        LOG_ABORT("attempted to open %s. fopen: %s", message_filepath,
+                  strerror(errno));
     }
 
     while ( (ret = load_file_to_buf(msg_file, file_contents_buf,

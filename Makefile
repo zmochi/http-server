@@ -1,5 +1,5 @@
 # raw compilation command:
-# clang `pkg-config --cflags --libs libevent` -Llibs -lpicohttpparser -o ./start_server src/headers.c src/http_utils.c src/main.c src/status_codes.c config.c
+# clang `pkg-config --cflags --libs libevent` -Llibs -lpicohttpparser -o ./start_server src/headers.c src/http_utils.c src/server.c src/status_codes.c config.c
 
 #LIBEVENT_LIB_FLAGS := `pkg-config --libs libevent`
 LIBEVENT_C_FLAGS := `pkg-config --libs --cflags libevent`
@@ -19,9 +19,9 @@ MAKE = make
 CC = clang
 
 # header file names with path relative to $(H_DIR)
-_HDEPS = headers.h main.h http_utils.h status_codes.h http_limits.h parser.h event_loop.h container_of.h list.h queue.h
+_HDEPS = headers.h server.h http_utils.h status_codes.h http_limits.h parser.h event_loop.h container_of.h list.h queue.h
 # c file names with path relative to $(SRC_DIR)
-_CDEPS = headers.c main.c http_utils.c status_codes.c http_limits.c parser.c event_loop.c
+_CDEPS = headers.c server.c http_utils.c status_codes.c http_limits.c parser.c event_loop.c
 HDEPS = $(patsubst %.h,$(H_DIR)/%.h,$(_HDEPS))
 CDEPS = $(patsubst %.c,$(SRC_DIR)/%.c,$(_CDEPS))
 OBJ = $(patsubst %.c,$(O_DIR)/%.o,$(_CDEPS))
@@ -30,7 +30,7 @@ OBJ = $(patsubst %.c,$(O_DIR)/%.o,$(_CDEPS))
 main: OPT += -O3
 main: all LIBS
 
-debug: OPT += -g
+debug: OPT += -g -DDEBUG
 debug: all LIBS
 
 all: $(SHARED_LIB_FILES) $(OBJ) $(MAIN_NAME) 

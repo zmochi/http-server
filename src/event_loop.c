@@ -57,7 +57,7 @@ struct event *add_event(struct event_base *base, socket_t socket,
  *
  * @param socket socket of connection
  * @param flags EV_TIMEOUT (passed by libevent) or user defined
- * CLIENT_CON_CLOSE/SERV_CON_CLOSE
+ * CLIENT_CON_CLOSE/SERV_CON_CLOSE (passed with event_wake())
  * @param arg `struct event_data` ptr of user event
  */
 void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
@@ -68,9 +68,15 @@ void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
         case EV_TIMEOUT:
             api_flags = TIMEOUT;
             break;
+        /* its possible for multiple flags to occur before this callback is run,
+         * treat them the same as CLIENT_CON_CLOSE */
+        case EV_TIMEOUT | CLIENT_CON_CLOSE | SERV_CON_CLOSE:
+        case EV_TIMEOUT | CLIENT_CON_CLOSE:
+        case CLIENT_CON_CLOSE | SERV_CON_CLOSE:
         case CLIENT_CON_CLOSE:
             api_flags = CLIENT_CON_CLOSE;
             break;
+        case EV_TIMEOUT | SERV_CON_CLOSE:
         case SERV_CON_CLOSE:
             api_flags = SERV_CON_CLOSE;
             break;
@@ -202,6 +208,9 @@ void event_wake(struct conn_data *ev_data, enum ev_type ev_type,
     _VALIDATE_LOGIC(ev_type != EV_SEND && ev_type != EV_NEWCONN,
                     "EV_SEND and EV_NEWCONN are always active and should not "
                     "be manually woken up.");
+    _VALIDATE_LOGIC((flags & (TIMEOUT | CLIENT_CON_CLOSE | SERV_CON_CLOSE)) !=
+                        0,
+                    "Unknown flag");
 
     struct event *event_to_wake;
 

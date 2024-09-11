@@ -2,7 +2,7 @@
 
 This is an HTTP 1.1 server implementation in C, currently WIP. The main challenges in implementing this server were supporting persistant connections and (to-be-completed) chunked Transfer-Encoding. If time permits I might make this even harder with multi-threading.
 
-This implementation builds on Berkley Sockets and is Unix-compatible, and aims to be fully cross-platform.
+This implementation builds on Berkeley Sockets and is Unix-compatible, and aims to be fully cross-platform.
 
 ## External libraries
 

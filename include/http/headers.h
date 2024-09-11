@@ -42,9 +42,9 @@ static inline void http_header_init(struct http_header *header,
     header->value = header_value;
 }
 
-struct header_hashset *malloc_init_hashset(void);
+struct header_hashset *init_hashset(void);
 void                   reset_header_hashset(struct header_hashset *set);
-void                   free_header_hashset(struct header_hashset *set);
+void                   destroy_hashset(struct header_hashset *set);
 struct header_value   *http_get_header(struct header_hashset *set,
                                        const char *name, int name_len);
 int http_set_header(struct header_hashset *set, const char *name, int name_len,

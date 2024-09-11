@@ -9,6 +9,7 @@
 extern const int BACKLOG;
 extern const int INIT_RECV_BUFFER_SIZE;
 extern const int INIT_SEND_BUFFER_CAPACITY;
+extern const int INIT_PATH_BUFFER_SIZE;
 extern const int MAX_RECV_BUFFER_SIZE;
 extern const int MAX_SEND_BUFFER_SIZE;
 extern const int SEND_REALLOC_MUL;

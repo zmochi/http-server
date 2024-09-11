@@ -193,7 +193,7 @@ struct header_hashset {
 const size_t arr_len  = MAX_HASH_VALUE;
 const size_t arr_size = arr_len * sizeof(struct header_value);
 
-extern inline struct header_hashset *malloc_init_hashset(void) {
+extern inline struct header_hashset *init_hashset(void) {
     /* just an array of struct http_header*, the index for a header string @str
      * is given by http_hash_header(str, strlen(str)) */
     struct header_hashset *set = malloc(sizeof(struct header_hashset));
@@ -211,7 +211,7 @@ extern inline void reset_header_hashset(struct header_hashset *set) {
     set->value_storage_ptr = set->value_storage;
 }
 
-extern inline void free_header_hashset(struct header_hashset *set) {
+extern inline void destroy_hashset(struct header_hashset *set) {
     free(set->arr);
     free(set);
 }

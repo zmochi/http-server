@@ -18,6 +18,8 @@ struct queue {
  */
 static inline int init_queue(struct queue *queue) { return 0; }
 
+static inline int destroy_queue(struct queue *queue) { return 0; }
+
 static inline int is_empty(struct queue *queue) { return queue->head == NULL; }
 
 static inline struct list_item *dequeue(struct queue *queue) {

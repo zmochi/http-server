@@ -1,11 +1,10 @@
-#include <http/server.h>
-/* defines socket_t */
 #include <http/event_loop.h>
 #include <http/headers.h>
 #include <http/http_limits.h>
 #include <http/http_utils.h>
 #include <http/parser.h>
 #include <http/queue.h>
+#include <http/server.h>
 #include <http/status_codes.h>
 
 /* external libs: */
@@ -312,16 +311,22 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 static inline int parse_request(struct client_data *con_data,
                                 struct http_header *headers_arr,
                                 size_t              headers_arr_cap) {
+    const char *req_path;
+    size_t      req_path_len;
     con_data->request->num_headers = headers_arr_cap;
 
     int status = http_parse_request(
         con_data->recv_buf->buffer, con_data->recv_buf->bytes_received,
-        &con_data->request->method, &con_data->request->path,
-        &con_data->request->path_len, &con_data->request->minor_ver,
-        headers_arr, &con_data->request->num_headers,
-        &con_data->recv_buf->bytes_parsed);
+        &con_data->request->method, &req_path, &req_path_len,
+        &con_data->request->minor_ver, headers_arr,
+        &con_data->request->num_headers, &con_data->recv_buf->bytes_parsed);
 
     if ( con_data->request->method == M_UNKNOWN ) return HTTP_BAD_REQ;
+
+    if ( !con_data->request->path )
+        LOG_ABORT("path buffer not allocated for connection request struct");
+    memcpy(con_data->request->path, req_path, req_path_len);
+    con_data->request->path_len = req_path_len;
 
     return status;
 }
@@ -775,7 +780,9 @@ static inline int init_client_request(struct client_data *con_data) {
     con_data->request = calloc(1, sizeof(*con_data->request));
     if ( !con_data->request ) return EXIT_FAILURE;
 
-    con_data->request->headers = malloc_init_hashset();
+    con_data->request->headers      = init_hashset();
+    con_data->request->path         = malloc(INIT_PATH_BUFFER_SIZE);
+    con_data->request->path_buf_cap = INIT_PATH_BUFFER_SIZE;
 
     return EXIT_SUCCESS;
 }

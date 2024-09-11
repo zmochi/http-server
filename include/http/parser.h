@@ -44,17 +44,16 @@ static struct method_str_code methods_strings[] = {
 };
 
 typedef struct {
-    /* pointers to the method and path in original client recv buf */
-    const char      *path;
+    /* an independent buffer holding the request path */
+    char            *path;
+    size_t           path_len, path_buf_cap;
     enum http_method method;
     int              minor_ver;
-    /* lengths of method and path strings above */
-    size_t method_len, path_len;
     /* hashset of headers of HTTP req, each headers value is copied into a
      * buffer inside this struct and is indepedent of the recv buffer */
     struct header_hashset *headers;
     size_t                 num_headers;
-    /* points to content of HTTP req from client */
+    /* points to content of HTTP req (points inside recv_buffer) from client */
     char  *message;
     size_t message_length;
 } http_req;

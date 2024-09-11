@@ -6,6 +6,7 @@
 /* for struct phr_header */
 #include <picohttpparser/picohttpparser.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 enum http_method get_method_code(const char *method) {
@@ -49,6 +50,10 @@ int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
     /* TODO circular recv: continue parsing request from buffer start if buffer
     end was reached */
 
+    if ( *bytes_parsed >= 0 ) return HTTP_OK;
+
+    /* if this code is reached then some error occurred in phr_parse_request */
+
     switch ( *bytes_parsed ) {
         case -1: // bad request
             return HTTP_BAD_REQ;
@@ -57,7 +62,7 @@ int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
             return HTTP_INCOMPLETE_REQ;
 
         default:
-            return HTTP_OK;
+            LOG_ABORT("Unknown return code from phr_parse_request");
     }
 }
 

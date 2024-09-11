@@ -122,6 +122,20 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     return ret;
 }
 
+/**
+ * @brief utility function to populate a `struct header_hashset` given a filled
+ * array of `struct http_header`s
+ *
+ * currently does not provide an indication as to whether all HTTP header names
+ * exist or not, simply ignores those cases (and doesn't populate the hashset
+ * with invalid names)
+ *
+ * @param set `struct header_hashset` to populate
+ * @param headers headers array filled with values to populate set from
+ * @param num_headers number of entries in headers array
+ * @return 0 on success, -1 on failure (currently there is no fail scenario
+ * since invalid header names are ignored)
+ */
 int populate_headers_map(struct header_hashset *set,
                          struct http_header headers[], size_t num_headers) {
 

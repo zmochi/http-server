@@ -91,9 +91,7 @@ void http_respond_builtin_status(struct client_data *con_data,
                                  http_status_code    status_code,
                                  int                 http_res_flags);
 
-static inline int parse_request(struct client_data *con_data,
-                                struct http_header *headers_arr,
-                                size_t              headers_arr_capstruct);
+static inline int parse_request(struct client_data *con_data);
 static inline int parse_content(struct client_data *con_data);
 
 static void reset_http_req(http_req *request);
@@ -304,22 +302,17 @@ int http_handle_incomplete_req(struct client_data *con_data) {
  * necessary information.
  *
  * @param con_data connection data to parse from and to
- * @param headers_arr headers array to fill with request headers
- * @param headers_arr_cap capactiy of headers array
  * @return one of `enum http_req_props` from parser.h
  */
-static inline int parse_request(struct client_data *con_data,
-                                struct http_header *headers_arr,
-                                size_t              headers_arr_cap) {
+static inline int parse_request(struct client_data *con_data) {
     const char *req_path;
     size_t      req_path_len;
-    con_data->request->num_headers = headers_arr_cap;
 
     int status = http_parse_request(
         con_data->recv_buf->buffer, con_data->recv_buf->bytes_received,
         &con_data->request->method, &req_path, &req_path_len,
-        &con_data->request->minor_ver, headers_arr,
-        &con_data->request->num_headers, &con_data->recv_buf->bytes_parsed);
+        &con_data->request->minor_ver, con_data->request->headers,
+        &con_data->recv_buf->bytes_parsed);
 
     if ( con_data->request->method == M_UNKNOWN ) return HTTP_BAD_REQ;
 
@@ -387,13 +380,9 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf->headers_parsed ) {
         /* parses everything preceding the content from request, populates
-         * @headers array with pointers to the HTTP headers and
-         * their values in the original request */
-        struct http_header headers[MAX_NUM_HEADERS];
-        /* must be initialized to capacity of @headers, after parse_request
-         * returns its value is changed to the actual number of headers */
-        size_t num_headers = ARR_SIZE(headers);
-        status             = parse_request(con_data, headers, num_headers);
+         * @con_data->request->headers with HTTP headers values copied from
+         * request */
+        status = parse_request(con_data);
 
         switch ( status ) {
             case HTTP_BAD_REQ:
@@ -414,9 +403,6 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         }
         // request line + headers are complete:
 
-        // populate headers hashmap
-        populate_headers_map(con_data->request->headers, headers,
-                             con_data->request->num_headers);
         con_data->recv_buf->headers_parsed = true;
     }
 

@@ -25,18 +25,26 @@ enum http_method get_method_code(const char *method) {
 
 int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
                        const char **path, size_t *path_len, int *minor_version,
-                       struct http_header header_arr[], size_t *num_headers,
-                       size_t *bytes_parsed) {
+                       struct header_hashset *header_set,
+                       size_t                *bytes_parsed) {
+    /* struct http_header must be a union with struct phr_header or this
+     * function breaks :/ */
+    struct http_header headers[MAX_NUM_HEADERS];
+    /* must be initialized to capacity of @headers, after parse_request
+     * returns its value is changed to the actual number of headers */
+    size_t      internal_num_headers = ARR_SIZE(headers);
     const char *method_in_buffer;
     size_t      method_buffer_len;
     /* phr_parse_request returns the *total* length of the HTTP request line +
      * headers for each call, so for each iteration use = instead of += */
     *bytes_parsed = phr_parse_request(
         buffer, buf_len, &method_in_buffer, &method_buffer_len, path, path_len,
-        minor_version, (struct phr_header *)header_arr, num_headers,
+        minor_version, (struct phr_header *)headers, &internal_num_headers,
         *bytes_parsed);
 
     *method = get_method_code(method_in_buffer);
+
+    populate_headers_map(header_set, headers, internal_num_headers);
 
     /* TODO circular recv: continue parsing request from buffer start if buffer
     end was reached */

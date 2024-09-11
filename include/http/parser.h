@@ -86,13 +86,12 @@ bool is_request_HTTP_compliant(http_req *request);
  */
 int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
                        const char **path, size_t *path_len, int *minor_version,
-                       struct http_header header_arr[], size_t *num_headers,
-                       size_t *bytes_parsed);
+                       struct header_hashset *header_set, size_t *bytes_parsed);
 
 /**
- * @brief parses content in HTTP request, given the Content-Length header value.
- * puts the correct size of content in @content_len parameter, or returns a
- * status indicating some kind of failure.
+ * @brief parses content in HTTP request, given the Content-Length header
+ * value. puts the correct size of content in @content_len parameter, or
+ * returns a status indicating some kind of failure.
  *
  * @param con_data Connection data to manage
  * @param content_bufptr pointer to start of received content

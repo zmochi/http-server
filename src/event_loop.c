@@ -1,3 +1,5 @@
+/* wrapper API around libevent's event loop for HTTP server needs */
+
 #include <src/event_loop.h>
 #include <src/http_utils.h>
 
@@ -6,12 +8,10 @@
 /* libevent: */
 #include <event2/event.h>
 
-/* private structs, exposed to user by name only in header file */
-
 /* a group of libevent events representing a single HTTP connection,
  * encompassing everything needed to handle an HTTP connection. This is an
  * opaque struct passed around by the end-user when using this the event loop
- * API */
+ * API, included in event_loop.h by reference only */
 struct conn_data {
     struct event_loop *ev_loop;
     socket_t           sockfd;
@@ -34,7 +34,7 @@ struct conn_data {
  * @param base libevent event_base to add event to
  * @param socket socket to monitor event on
  * @param ev_type **one** of `enum ev_type`
- * @param callback_fn one of the internal callback functions
+ * @param callback_fn one of the API's callback functions
  * @param timeout timeout of event
  * @param arg arg to pass to callback_fn
  */
@@ -68,18 +68,22 @@ void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
         case EV_TIMEOUT:
             api_flags = TIMEOUT;
             break;
-        /* its possible for multiple flags to occur before this callback is run,
-         * treat them the same as CLIENT_CON_CLOSE */
+
+        /* its possible for multiple flags to occur before this callback is run
+         * (and thus be OR'd together), treat them the same as CLIENT_CON_CLOSE
+         */
         case EV_TIMEOUT | CLIENT_CON_CLOSE | SERV_CON_CLOSE:
         case EV_TIMEOUT | CLIENT_CON_CLOSE:
         case CLIENT_CON_CLOSE | SERV_CON_CLOSE:
         case CLIENT_CON_CLOSE:
             api_flags = CLIENT_CON_CLOSE;
             break;
+
         case EV_TIMEOUT | SERV_CON_CLOSE:
         case SERV_CON_CLOSE:
             api_flags = SERV_CON_CLOSE;
             break;
+
         default:
             LOG_ABORT("Unexpected flag. Stopping");
     }
@@ -126,7 +130,8 @@ int ev_init_loop(struct event_loop *ev_loop) {
                     "set before calling ev_init_loop().");
 
     event_loop_base = event_base_new();
-    catchExcp(event_loop_base == NULL, "Couldn't open event base.", 1);
+    if ( event_loop_base == NULL )
+        LOG_ABORT("event_base_new: couldn't open event base.");
 
     ev_loop->base = event_loop_base;
 
@@ -138,10 +143,9 @@ int ev_init_loop(struct event_loop *ev_loop) {
     event_accept = add_event(event_loop_base, listen_sockfd, EV_NEWCONN,
                              _ev_accept_cb, NULL, ev_loop);
 
+    /* event_base_loop does not return until the server stops running */
     status = event_base_loop(event_loop_base, EVLOOP_NO_EXIT_ON_EMPTY);
-    if ( status == -1 ) {
-        LOG_ABORT("event_base_loop: couldn't start event loop");
-    }
+    if ( status == -1 ) LOG_ABORT("event_base_loop: couldn't start event loop");
 
     event_free(event_accept);
 
@@ -248,18 +252,22 @@ struct event *add_event(struct event_base *base, socket_t socket,
         case EV_RECV:
             libevent_flags = EV_READ | EV_PERSIST;
             break;
+
         case EV_SEND:
             libevent_flags = EV_WRITE | EV_PERSIST;
             break;
+
         case EV_CLOSE:
             libevent_flags = EV_TIMEOUT;
             sock           = -1;
             break;
+
         case EV_NEWCONN:
             /* EV_PERSIST keeps the event active (listening for new connections)
              * instead of sending it to sleep after a single wake-up */
             libevent_flags = EV_READ | EV_PERSIST;
             break;
+
         default:
             LOGIC_ERR("Passed non-existent event type.");
     }

@@ -90,7 +90,6 @@ int  http_respond(struct client_data *con_data, http_res *response);
 void http_respond_builtin_status(struct client_data *con_data,
                                  http_status_code    status_code,
                                  int                 http_res_flags);
-
 static inline int parse_request(struct client_data *con_data);
 static inline int parse_content(struct client_data *con_data);
 
@@ -188,8 +187,8 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
     if ( unsent_data_exists ) LOG_DEBUG("unsent_data_exis");
     if ( client_closed_con ) LOG_DEBUG("client_closed_con");
     if ( server_close_requested ) LOG_DEBUG("server_close_requested");
-    /* failsafe: don't close connection if close wasn't requested, client didn't
-     * close connection or connection didn't timeout */
+    /* failsafe: don't close connection if close wasn't requested, client
+     * didn't close connection or connection didn't timeout */
     if ( !(server_close_requested || client_closed_con || timed_out) ) {
         LOG_ERR("callback triggered when it shouldn't have");
         return;
@@ -204,9 +203,9 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
 
     LOG_DEBUG("closing connection");
 
-    /* discard queued data to be sent: each call to finished_sending frees the
-     * next buffer in queue of responses to be sent, when `true` is returned,
-     * there is nothing more to free */
+    /* discard queued data to be sent: each call to finished_sending frees
+     * the next buffer in queue of responses to be sent, when `true` is
+     * returned, there is nothing more to free */
     while ( !finished_sending(con_data) )
         ;
 
@@ -241,8 +240,8 @@ void send_cb(socket_t sockfd, int flags, void *arg) {
                   evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
     } else if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
         /* all data sent, get next send buffer in the queue.
-         * if there are no more buffers and connection should be closed, wake
-         * close event */
+         * if there are no more buffers and connection should be closed,
+         * wake close event */
         if ( finished_sending(con_data) && con_data->close_requested )
             terminate_connection(con_data, SERV_CON_CLOSE);
     } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
@@ -271,7 +270,8 @@ bool finished_sending(struct client_data *con_data) {
 
 int http_handle_incomplete_req(struct client_data *con_data) {
     LOG_DEBUG(":)");
-    /* TODO circular recv: shouldn't resize buffer every time in circular buffer
+    /* TODO circular recv: shouldn't resize buffer every time in circular
+     * buffer
      */
     int status;
     /* if request is incomplete because we reached buffer capacity,
@@ -297,7 +297,8 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 }
 
 /**
- * @brief parses request that starts at @con_data->recv_buf->buffer, with length
+ * @brief parses request that starts at @con_data->recv_buf->buffer, with
+ * length
  * @con_data->recv_buf->bytes_received and fills @con_data->request with
  * necessary information.
  *
@@ -316,6 +317,8 @@ static inline int parse_request(struct client_data *con_data) {
 
     if ( con_data->request->method == M_UNKNOWN ) return HTTP_BAD_REQ;
 
+    /* TODO: realloc path buffer as necessary. leaving this as is for now
+     * because future memory pool implementation should do this */
     if ( !con_data->request->path )
         LOG_ABORT("path buffer not allocated for connection request struct");
     memcpy(con_data->request->path, req_path, req_path_len);
@@ -328,8 +331,8 @@ static inline int parse_content(struct client_data *con_data) {
     struct header_value *content_len_header = http_get_header(
         con_data->request->headers, "Content-Length", strlen("Content-Length"));
     if ( content_len_header == NULL )
-        /* no Content-Length header, rest of data received can be considered to
-         * be a new request */
+        /* no Content-Length header, rest of data received can be considered
+         * to be a new request */
         return HTTP_OK;
 
     size_t bytes_received_excluding_content =
@@ -363,6 +366,9 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
 
         case CON_RESET:
             LOG_DEBUG("client forcibly closed connection");
+            terminate_connection(con_data, CLIENT_CON_CLOSE);
+            return;
+
         case RECV_CLIENT_CLOSED_CON:
             LOG_DEBUG("client gracefully closed connection");
             terminate_connection(con_data, CLIENT_CON_CLOSE);
@@ -397,28 +403,24 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
                 break;
 
             default:
-                LOG_ABORT(
-                    "recv_cb: unexpected return value from http_parse_request. "
-                    "terminating server");
+                LOG_ABORT("recv_cb: unexpected return value from "
+                          "http_parse_request. "
+                          "terminating server");
         }
         // request line + headers are complete:
 
         con_data->recv_buf->headers_parsed = true;
     }
 
-    if ( !is_request_HTTP_compliant(con_data->request) ) {
-        http_respond_builtin_status(con_data, Bad_Request, 0);
-        return;
-    }
-
-    /* write start address of content (message) to the http request struct, if
-     * this is the second or more pass, rewrite incase recv_buf was re-allocated
+    /* write start address of content (message) to the http request struct,
+     * if this is the second or more pass, rewrite incase recv_buf was
+     * re-allocated
      */
     con_data->request->message = con_data->recv_buf->buffer + *bytes_parsed;
 
-    /* continue parsing HTTP message content (or begin parsing if this is the
-     * first pass). does not modify bytes_parsed unless completed parsing (and
-     * returns HTTP_OK) */
+    /* continue parsing HTTP message content (or begin parsing if this is
+     * the first pass). does not modify bytes_parsed unless completed
+     * parsing (and returns HTTP_OK) */
     status = parse_content(con_data);
 
     switch ( status ) {
@@ -427,8 +429,8 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
             return; /* wait for more data to become available */
 
         case HTTP_ENTITY_TOO_LARGE:
-            /* closes connection if entity too large, since there is no space to
-             * process more additional requests */
+            /* closes connection if entity too large, since there is no
+             * space to process more additional requests */
             http_respond_builtin_status(con_data, Request_Entity_Too_Large,
                                         SERV_CON_CLOSE);
             return;
@@ -541,9 +543,9 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
  */
 int http_respond(struct client_data *con_data, http_res *response) {
     bool message_exists = response->message != NULL;
-    /* the struct send_buffer and associated buffer will be free'd in send_cb.
-     * INIT_SEND_BUFFER_CAPACITY must be big enough for HTTP_RESPONSE_BASE_FMT
-     * after its been formatted. */
+    /* the struct send_buffer and associated buffer will be free'd in
+     * send_cb. INIT_SEND_BUFFER_CAPACITY must be big enough for
+     * HTTP_RESPONSE_BASE_FMT after its been formatted. */
     struct send_buffer *new_send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
     if ( !new_send_buf ) HANDLE_ALLOC_FAIL();
 
@@ -587,9 +589,9 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
         if ( ret == 0 ) {
             /* shouldn't happen, but not a critical error */
-            LOG_ERR(
-                "copy_headers_to_buf: no bytes written even though there was "
-                "at least 1 header to write");
+            LOG_ERR("copy_headers_to_buf: no bytes written even though "
+                    "there was "
+                    "at least 1 header to write");
         } else if ( ret == -1 ) {
             ret = handler_buf_realloc(
                 &new_send_buf->buffer, &new_send_buf->capacity,
@@ -635,8 +637,8 @@ int http_respond(struct client_data *con_data, http_res *response) {
 
 /**
  * @brief sends default response for the specified @status_code
- * the response for status code XXX is expected to be found in the root folder
- * specified in config, under the name XXX.html
+ * the response for status code XXX is expected to be found in the root
+ * folder specified in config, under the name XXX.html
  *
  * @param con_data client to send response to
  * @param status_code status code of the response
@@ -649,8 +651,8 @@ void http_respond_builtin_status(struct client_data *con_data,
     http_res     response;
     size_t       init_file_content_cap = INIT_SEND_BUFFER_CAPACITY;
     const size_t MAX_FILE_READ_SIZE    = 1 << 27;
-    char message_filepath[1024]; /* arbitrary size, should be big enough for any
-                                   path */
+    char message_filepath[1024]; /* arbitrary size, should be big enough for
+                                   any path */
     int status;
     /* for load_file_to_buf call: */
     ev_ssize_t ret;
@@ -880,7 +882,8 @@ struct client_data *add_client(struct event_loop *ev_loop, socket_t socket) {
 }
 
 /**
- * @brief destroys struct client_data that was initialized by init_client_data
+ * @brief destroys struct client_data that was initialized by
+ * init_client_data
  *
  * @param con_data struct client_data to destroy
  */

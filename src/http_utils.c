@@ -7,14 +7,6 @@
 
 extern const int BACKLOG;
 
-/**
- * @brief gets current GMT time in the format (example) "Sun, 01 Jan 1970
- * 00:00:00 GMT"
- *
- * @param buf buf to fill time in
- * @param bufcap capacity of @buf
- * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure.
- */
 int strftime_gmtformat(char *buf, size_t bufcap) {
 
     time_t     time_now         = time(NULL);
@@ -30,15 +22,6 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
     return EXIT_SUCCESS;
 }
 
-/**
- * @brief copies and formats an array of headers into a buffer
- *
- * @param headers array of headers
- * @param num_headers number of elements in headers array
- * @param buffer buffer to copy formatted headers to
- * @param capacity buffer capacity
- * @return number of bytes written on success, -1 if capacity is too small
- */
 ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
                                char *buffer, size_t capacity) {
     const int NO_MEM_ERR    = -1;
@@ -74,20 +57,6 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
     return bytes_written;
 }
 
-/**
- * @brief reads from @file to @buf with capacity @buf_capacity.
- *
- * caller should repeatedly call this function until EOF is reached, increasing
- * buffer capacity on each call where EOF wasn't reached.
- *
- * @param file open file to read from, opened with fopen()
- * @param buf buffer to load file contents into
- * @param buf_capacity buffer capacity
- * @param total_read total size read from file by the function so far. should be
- * 0 on first call and passed to the function unchanged on every following call.
- * @return number of bytes written in this call to the function, -1 on EOF, or
- * -2 if an error occurred
- */
 ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
                             size_t *total_read) {
     const int FILE_FAIL = -2, FILE_EOF = -1;
@@ -99,7 +68,8 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     /* read fread return value into an appropriate type: */
     ret_size_t = fread(buf + last, sizeof(char), capacity - last, file);
     if ( ret_size_t > EV_SSIZE_MAX ) {
-        LOG_ABORT("fread: file contains more data than ssize_t can handle");
+        LOG_ERR("fread: file contains more data than ssize_t can handle");
+        return FILE_FAIL;
     }
     /* return value of fread fits in ssize_t, cast it: */
     ret = ret_size_t;
@@ -122,20 +92,6 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     return ret;
 }
 
-/**
- * @brief utility function to populate a `struct header_hashset` given a filled
- * array of `struct http_header`s
- *
- * currently does not provide an indication as to whether all HTTP header names
- * exist or not, simply ignores those cases (and doesn't populate the hashset
- * with invalid names)
- *
- * @param set `struct header_hashset` to populate
- * @param headers headers array filled with values to populate set from
- * @param num_headers number of entries in headers array
- * @return 0 on success, -1 on failure (currently there is no fail scenario
- * since invalid header names are ignored)
- */
 int populate_headers_map(struct header_hashset *set,
                          struct http_header headers[], size_t num_headers) {
 
@@ -189,7 +145,6 @@ int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
     if ( *buf == NULL ) {
         // TODO
         HANDLE_ALLOC_FAIL();
-        exit(1);
     }
 
     return 0;

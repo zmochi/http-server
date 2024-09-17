@@ -23,15 +23,15 @@ enum ev_type {
     EV_NEWCONN,
 };
 
-#define SET_LEFTMOST_SHORT_BIT(bit) (1 << (CHAR_BIT * sizeof(short) - bit - 1))
+#define SHORT_SET_LEFTMOST_BIT(bit) (1 << (CHAR_BIT * sizeof(short) - bit - 1))
 /* flags that an event callback can receive, must be set from left otherwise
  * they collide with event loop library flags */
 enum ev_flags {
     /* enums are guaranteed to have max size of int, bigger than short */
-    TIMEOUT = SET_LEFTMOST_SHORT_BIT(0), /* should not be passed manually. this
+    TIMEOUT = SHORT_SET_LEFTMOST_BIT(0), /* should not be passed manually. this
                 is an event loop indication of timeout */
-    SERV_CON_CLOSE   = SET_LEFTMOST_SHORT_BIT(1),
-    CLIENT_CON_CLOSE = SET_LEFTMOST_SHORT_BIT(2),
+    SERV_CON_CLOSE   = SHORT_SET_LEFTMOST_BIT(1),
+    CLIENT_CON_CLOSE = SHORT_SET_LEFTMOST_BIT(2),
 };
 
 /* private structs, end-user should only pass from/to the wrapper's methods */
@@ -42,7 +42,7 @@ struct event_base;
 struct conn_data;
 
 struct event_loop {
-    /* field for internal use, set by ev_init_loop() */
+    /* `base` field is for internal use, set by ev_init_loop() */
     struct event_base *base;
     socket_t           listen_sockfd;
     struct timeval     default_timeout;

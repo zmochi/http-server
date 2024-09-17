@@ -65,25 +65,8 @@ typedef struct {
  * @param request request to check against
  * @return true if request is compliant, false otherwise
  */
-bool is_request_HTTP_compliant(http_req *request);
+bool is_request_HTTP_compliant(const http_req *request);
 
-/** TODO: fix documentation
- * @brief Calls `recv()` on `sockfd` and stored the result in `buffer`.
- * Can be called multiple times as long as the request is incomplete, and
- * updates `bytes_received`, `bytes_parsed`, `request` accordingly.
- *
- * Should only be called when there is data to receive!
- * @param sockfd Socket to receive
- * @param buffer Pointer to buffer containing the request
- * @param buffer_len Length/size of `buffer`
- * @param request A special `http_req` struct
- * @param bytes_received Total bytes received from previous calls to this
- * method
- * @param bytes_parsed Total bytes parsed in previous calls to this method
- * @return -1 on illegal HTTP request format
- * -2 on incomplete HTTP request
- * TODO: simplify code
- */
 int http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
                        const char **path, size_t *path_len, int *minor_version,
                        struct header_hashset *header_set, size_t *bytes_parsed);

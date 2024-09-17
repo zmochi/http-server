@@ -1,8 +1,8 @@
-#include <http/event_loop.h>
-#include <http/headers.h>
-#include <http/parser.h>
-#include <http/queue.h>
-#include <http/status_codes.h>
+#include <src/event_loop.h>
+#include <src/headers.h>
+#include <src/parser.h>
+#include <src/queue.h>
+#include <src/status_codes.h>
 #ifdef _WIN32
 #include <winsock.h>
 #else // Unix probably?

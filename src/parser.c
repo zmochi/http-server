@@ -1,6 +1,6 @@
-#include <http/headers.h>
-#include <http/http_utils.h>
-#include <http/parser.h>
+#include <src/headers.h>
+#include <src/http_utils.h>
+#include <src/parser.h>
 /* for struct client_data, enum http_method, enum http_header_props */
 
 /* for struct phr_header */

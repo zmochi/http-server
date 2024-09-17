@@ -1,6 +1,10 @@
-// if any of the names defined below are changed, make sure to update the functions at the bottom
+// This file will be processed by GNU gperf to generate a perfect hash table C file called headers.h
+// The following command should be used for generating the file:
+// gperf -I --output-file=headers.c HTTP_fields.gperf 
+
+// if any of the names defined below (in %define) are changed, make sure to update the functions at the bottom
 %{
-#include <http/headers.h>
+#include <src/headers.h>
 #include <stdlib.h>
 %}
 %compare-strncmp 

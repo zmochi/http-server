@@ -1,5 +1,5 @@
-#include <http/headers.h>
-#include <http/http_utils.h>
+#include <src/headers.h>
+#include <src/http_utils.h>
 
 #include <inttypes.h>
 #include <stdlib.h>

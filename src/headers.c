@@ -29,9 +29,9 @@
 #error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
-#line 2 "HTTP_fields.gperf"
+#line 6 "HTTP_fields.gperf"
 
-#include <http/headers.h>
+#include <src/headers.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -381,7 +381,7 @@ http_lookup_header (register const char *str, register size_t len)
     }
   return 0;
 }
-#line 181 "HTTP_fields.gperf"
+#line 185 "HTTP_fields.gperf"
 
 
 struct header_hashset {

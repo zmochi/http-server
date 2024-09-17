@@ -1,11 +1,11 @@
-#include <http/event_loop.h>
-#include <http/headers.h>
-#include <http/http_limits.h>
-#include <http/http_utils.h>
-#include <http/parser.h>
-#include <http/queue.h>
-#include <http/server.h>
-#include <http/status_codes.h>
+#include <src/event_loop.h>
+#include <src/headers.h>
+#include <src/http_limits.h>
+#include <src/http_utils.h>
+#include <src/parser.h>
+#include <src/queue.h>
+#include <src/server.h>
+#include <src/status_codes.h>
 
 /* external libs: */
 #include <event2/util.h>

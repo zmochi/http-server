@@ -1,4 +1,6 @@
-#include <http/server.h>
+#include <src/http_utils.h>
+#include <src/server.h>
+#include <string.h>
 
 http_res handler(http_req *request) {
     http_res response = {.status_code = Not_Implemented,

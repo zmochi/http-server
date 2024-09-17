@@ -9,8 +9,8 @@ extern const int BACKLOG;
 
 int strftime_gmtformat(char *buf, size_t bufcap) {
 
-    time_t     time_now         = time(NULL);
-    struct tm *tm_info          = gmtime(&time_now);
+    time_t     time_now = time(NULL);
+    struct tm *tm_info = gmtime(&time_now);
     int        EXPECTED_FMT_LEN = 29;
 
     /* strftime returns number of characters written to buf on success. The
@@ -24,7 +24,7 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
 
 ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
                                char *buffer, size_t capacity) {
-    const int NO_MEM_ERR    = -1;
+    const int NO_MEM_ERR = -1;
     size_t    bytes_written = 0;
     /* the buffer start point and buffer capacity change while writing to the
      * buffer. these variables hold the effective buffer and its effective
@@ -37,8 +37,8 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
 
     for ( size_t i = 0; i < num_headers; i++ ) {
         struct http_header header = headers[i];
-        eff_bufcap                = capacity - bytes_written;
-        eff_buf                   = buffer + bytes_written;
+        eff_bufcap = capacity - bytes_written;
+        eff_buf = buffer + bytes_written;
 
         /* snprintf should be fine since HTTP standard disallows null bytes in
          * header values */
@@ -140,7 +140,7 @@ int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
     if ( *bufsize >= max_size ) {
         return 1;
     }
-    *buf     = realloc(*buf, new_size);
+    *buf = realloc(*buf, new_size);
     *bufsize = new_size;
     if ( *buf == NULL ) {
         // TODO

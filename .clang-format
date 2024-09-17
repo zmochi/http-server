@@ -14,7 +14,7 @@ AllowShortIfStatementsOnASingleLine: true
 
 # aligns assignments along =
 AlignConsecutiveAssignments:
-  Enabled: true
+  Enabled: false
   AcrossEmptyLines: false
   AcrossComments: false
 

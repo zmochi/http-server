@@ -159,11 +159,11 @@ struct conn_data *ev_add_conn(struct event_loop *ev_loop, socket_t socket,
                               void *cb_arg) {
     /* freed in ev_remove_event */
     struct conn_data *connection_data = calloc(1, sizeof(*connection_data));
-    struct timeval   *client_timeout  = &ev_loop->default_timeout;
+    struct timeval   *client_timeout = &ev_loop->default_timeout;
 
     ev_callback_fn read_cb = ev_loop->read_cb, write_cb = ev_loop->write_cb,
                    close_conn_cb = ev_loop->close_conn_cb,
-                   new_conn_cb   = ev_loop->new_conn_cb;
+                   new_conn_cb = ev_loop->new_conn_cb;
 
     _VALIDATE_LOGIC(ev_loop->base != NULL,
                     "base field of `struct event_loop` should be set by "
@@ -177,10 +177,10 @@ struct conn_data *ev_add_conn(struct event_loop *ev_loop, socket_t socket,
     /* set timeout to default timeout of events in this event loop */
     connection_data->timeout = *client_timeout;
 
-    connection_data->read_cb       = read_cb;
-    connection_data->write_cb      = write_cb;
+    connection_data->read_cb = read_cb;
+    connection_data->write_cb = write_cb;
     connection_data->close_conn_cb = close_conn_cb;
-    connection_data->user_cb_arg   = cb_arg;
+    connection_data->user_cb_arg = cb_arg;
 
     /* add_event() simply exits on error, no need to check errors */
     connection_data->event_read = add_event(ev_loop->base, socket, EV_RECV,
@@ -259,7 +259,7 @@ struct event *add_event(struct event_base *base, socket_t socket,
 
         case EV_CLOSE:
             libevent_flags = EV_TIMEOUT;
-            sock           = -1;
+            sock = -1;
             break;
 
         case EV_NEWCONN:

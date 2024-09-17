@@ -1,32 +1,33 @@
 /* ANSI-C code produced by gperf version 3.1 */
-/* Command-line: /opt/homebrew/bin/gperf -I --output-file=headers.c HTTP_fields.gperf  */
+/* Command-line: /opt/homebrew/bin/gperf -I --output-file=headers.c
+ * HTTP_fields.gperf  */
 /* Computed positions: -k'1,3,14,22,$' */
 
-#if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
-      && ('%' == 37) && ('&' == 38) && ('\'' == 39) && ('(' == 40) \
-      && (')' == 41) && ('*' == 42) && ('+' == 43) && (',' == 44) \
-      && ('-' == 45) && ('.' == 46) && ('/' == 47) && ('0' == 48) \
-      && ('1' == 49) && ('2' == 50) && ('3' == 51) && ('4' == 52) \
-      && ('5' == 53) && ('6' == 54) && ('7' == 55) && ('8' == 56) \
-      && ('9' == 57) && (':' == 58) && (';' == 59) && ('<' == 60) \
-      && ('=' == 61) && ('>' == 62) && ('?' == 63) && ('A' == 65) \
-      && ('B' == 66) && ('C' == 67) && ('D' == 68) && ('E' == 69) \
-      && ('F' == 70) && ('G' == 71) && ('H' == 72) && ('I' == 73) \
-      && ('J' == 74) && ('K' == 75) && ('L' == 76) && ('M' == 77) \
-      && ('N' == 78) && ('O' == 79) && ('P' == 80) && ('Q' == 81) \
-      && ('R' == 82) && ('S' == 83) && ('T' == 84) && ('U' == 85) \
-      && ('V' == 86) && ('W' == 87) && ('X' == 88) && ('Y' == 89) \
-      && ('Z' == 90) && ('[' == 91) && ('\\' == 92) && (']' == 93) \
-      && ('^' == 94) && ('_' == 95) && ('a' == 97) && ('b' == 98) \
-      && ('c' == 99) && ('d' == 100) && ('e' == 101) && ('f' == 102) \
-      && ('g' == 103) && ('h' == 104) && ('i' == 105) && ('j' == 106) \
-      && ('k' == 107) && ('l' == 108) && ('m' == 109) && ('n' == 110) \
-      && ('o' == 111) && ('p' == 112) && ('q' == 113) && ('r' == 114) \
-      && ('s' == 115) && ('t' == 116) && ('u' == 117) && ('v' == 118) \
-      && ('w' == 119) && ('x' == 120) && ('y' == 121) && ('z' == 122) \
-      && ('{' == 123) && ('|' == 124) && ('}' == 125) && ('~' == 126))
+#if !(                                                                         \
+    (' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) && ('%' == 37) && \
+    ('&' == 38) && ('\'' == 39) && ('(' == 40) && (')' == 41) &&               \
+    ('*' == 42) && ('+' == 43) && (',' == 44) && ('-' == 45) && ('.' == 46) && \
+    ('/' == 47) && ('0' == 48) && ('1' == 49) && ('2' == 50) && ('3' == 51) && \
+    ('4' == 52) && ('5' == 53) && ('6' == 54) && ('7' == 55) && ('8' == 56) && \
+    ('9' == 57) && (':' == 58) && (';' == 59) && ('<' == 60) && ('=' == 61) && \
+    ('>' == 62) && ('?' == 63) && ('A' == 65) && ('B' == 66) && ('C' == 67) && \
+    ('D' == 68) && ('E' == 69) && ('F' == 70) && ('G' == 71) && ('H' == 72) && \
+    ('I' == 73) && ('J' == 74) && ('K' == 75) && ('L' == 76) && ('M' == 77) && \
+    ('N' == 78) && ('O' == 79) && ('P' == 80) && ('Q' == 81) && ('R' == 82) && \
+    ('S' == 83) && ('T' == 84) && ('U' == 85) && ('V' == 86) && ('W' == 87) && \
+    ('X' == 88) && ('Y' == 89) && ('Z' == 90) && ('[' == 91) &&                \
+    ('\\' == 92) && (']' == 93) && ('^' == 94) && ('_' == 95) &&               \
+    ('a' == 97) && ('b' == 98) && ('c' == 99) && ('d' == 100) &&               \
+    ('e' == 101) && ('f' == 102) && ('g' == 103) && ('h' == 104) &&            \
+    ('i' == 105) && ('j' == 106) && ('k' == 107) && ('l' == 108) &&            \
+    ('m' == 109) && ('n' == 110) && ('o' == 111) && ('p' == 112) &&            \
+    ('q' == 113) && ('r' == 114) && ('s' == 115) && ('t' == 116) &&            \
+    ('u' == 117) && ('v' == 118) && ('w' == 119) && ('x' == 120) &&            \
+    ('y' == 121) && ('z' == 122) && ('{' == 123) && ('|' == 124) &&            \
+    ('}' == 125) && ('~' == 126))
 /* The character set is not based on ISO-646.  */
-#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
+#error                                                                         \
+    "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
 #line 6 "HTTP_fields.gperf"
@@ -35,11 +36,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TOTAL_KEYWORDS 167
+#define TOTAL_KEYWORDS  167
 #define MIN_WORD_LENGTH 2
 #define MAX_WORD_LENGTH 40
-#define MIN_HASH_VALUE 5
-#define MAX_HASH_VALUE 412
+#define MIN_HASH_VALUE  5
+#define MAX_HASH_VALUE  412
 /* maximum key range = 408, duplicates = 0 */
 
 #ifdef __GNUC__
@@ -49,86 +50,86 @@ __inline
 inline
 #endif
 #endif
-static unsigned int
-http_hash_header (register const char *str, register size_t len)
-{
-  static unsigned short asso_values[] =
-    {
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413,  30, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413,   0, 413,  15,  25,  75,
-       35,   0,  55,  15, 413,  25, 135, 200,  65,  50,
-       45, 413, 155,  70,  80,  55,  10,  50,   5, 413,
-      413, 413, 413, 413, 413, 413, 413,  85, 155,   0,
-       60,  15,   5,  65,  60,  20, 413,   0,   0, 125,
-        0,  10, 110, 413,  15,   0,  10,  95, 413,   0,
-       30,   0,  20, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
-      413, 413, 413, 413, 413, 413
-    };
-  register unsigned int hval = len;
+    static unsigned int
+    http_hash_header(register const char *str, register size_t len) {
+    static unsigned short asso_values[] = {
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 30,  413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 0,   413, 15,  25,  75,
+        35,  0,   55,  15,  413, 25,  135, 200, 65,  50,  45,  413, 155, 70,
+        80,  55,  10,  50,  5,   413, 413, 413, 413, 413, 413, 413, 413, 85,
+        155, 0,   60,  15,  5,   65,  60,  20,  413, 0,   0,   125, 0,   10,
+        110, 413, 15,  0,   10,  95,  413, 0,   30,  0,   20,  413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413, 413,
+        413, 413, 413, 413};
+    register unsigned int hval = len;
 
-  switch (hval)
-    {
-      default:
-        hval += asso_values[(unsigned char)str[21]];
-      /*FALLTHROUGH*/
-      case 21:
-      case 20:
-      case 19:
-      case 18:
-      case 17:
-      case 16:
-      case 15:
-      case 14:
-        hval += asso_values[(unsigned char)str[13]];
-      /*FALLTHROUGH*/
-      case 13:
-      case 12:
-      case 11:
-      case 10:
-      case 9:
-      case 8:
-      case 7:
-      case 6:
-      case 5:
-      case 4:
-      case 3:
-        hval += asso_values[(unsigned char)str[2]];
-      /*FALLTHROUGH*/
-      case 2:
-      case 1:
-        hval += asso_values[(unsigned char)str[0]];
-        break;
+    switch ( hval ) {
+        default:
+            hval += asso_values[(unsigned char)str[21]];
+        /*FALLTHROUGH*/
+        case 21:
+        case 20:
+        case 19:
+        case 18:
+        case 17:
+        case 16:
+        case 15:
+        case 14:
+            hval += asso_values[(unsigned char)str[13]];
+        /*FALLTHROUGH*/
+        case 13:
+        case 12:
+        case 11:
+        case 10:
+        case 9:
+        case 8:
+        case 7:
+        case 6:
+        case 5:
+        case 4:
+        case 3:
+            hval += asso_values[(unsigned char)str[2]];
+        /*FALLTHROUGH*/
+        case 2:
+        case 1:
+            hval += asso_values[(unsigned char)str[0]];
+            break;
     }
-  return hval + asso_values[(unsigned char)str[len - 1]];
+    return hval + asso_values[(unsigned char)str[len - 1]];
 }
 
-static const char * http_headerlist[] =
-  {
-    "", "", "", "", "",
+static const char *http_headerlist[] = {
+    "",
+    "",
+    "",
+    "",
+    "",
     "Allow",
-    "", "", "", "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Accept-Ranges",
-    "", "",
+    "",
+    "",
     "Accept",
     "Alt-Svc",
-    "", "",
+    "",
+    "",
     "Alternates",
     "Accept-Post",
     "If",
@@ -201,7 +202,8 @@ static const char * http_headerlist[] =
     "Overwrite",
     "User-Agent",
     "Want-Repr-Digest",
-    "", "",
+    "",
+    "",
     "Proxy-Authorization",
     "Accept-Language",
     "Sec-Purpose",
@@ -209,7 +211,9 @@ static const char * http_headerlist[] =
     "",
     "Access-Control-Request-Method",
     "Optional-WWW-Authenticate",
-    "", "", "",
+    "",
+    "",
+    "",
     "Want-Content-Digest",
     "Set-Cookie",
     "Server",
@@ -238,10 +242,12 @@ static const char * http_headerlist[] =
     "SLUG",
     "Sec-WebSocket-Accept",
     "Content-Language",
-    "", "",
+    "",
+    "",
     "Sec-WebSocket-Extensions",
     "Strict-Transport-Security",
-    "", "",
+    "",
+    "",
     "Ordering-Type",
     "Link",
     "Clear-Site-Data",
@@ -256,7 +262,8 @@ static const char * http_headerlist[] =
     "Content-Length",
     "",
     "Apply-To-Redirect-Ref",
-    "", "",
+    "",
+    "",
     "Negotiate",
     "Accept-Datetime",
     "",
@@ -264,18 +271,24 @@ static const char * http_headerlist[] =
     "Cross-Origin-Embedder-Policy",
     "Signature",
     "OData-Isolation",
-    "", "",
+    "",
+    "",
     "Server-Timing",
     "",
     "SoapAction",
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
     "Cross-Origin-Embedder-Policy-Report-Only",
     "OData-MaxVersion",
     "",
     "Last-Event-ID",
     "From",
     "Range",
-    "", "", "",
+    "",
+    "",
+    "",
     "Ping-From",
     "Status-URI",
     "",
@@ -285,22 +298,29 @@ static const char * http_headerlist[] =
     "Early-Data",
     "Traceparent",
     "Trailer",
-    "", "",
+    "",
+    "",
     "Tracestate",
     "Retry-After",
     "Expires",
-    "", "",
+    "",
+    "",
     "Topic",
-    "", "",
+    "",
+    "",
     "CDN-Loop",
     "",
     "Depth",
     "Expect",
     "OSLC-Core-Version",
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
     "Schedule-Tag",
     "Last-Modified",
-    "", "",
+    "",
+    "",
     "If-Schedule-Tag-Match",
     "Sec-Token-Binding",
     "TCN",
@@ -310,9 +330,13 @@ static const char * http_headerlist[] =
     "IM",
     "",
     "A-IM",
-    "", "",
+    "",
+    "",
     "Timeout",
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
     "Refresh",
     "Access-Control-Allow-Methods",
     "ETag",
@@ -321,68 +345,200 @@ static const char * http_headerlist[] =
     "Redirect-Ref",
     "",
     "DASL",
-    "", "",
+    "",
+    "",
     "Public-Key-Pins-Report-Only",
     "Cross-Origin-Resource-Policy",
-    "", "", "",
+    "",
+    "",
+    "",
     "Max-Forwards",
-    "", "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Preference-Applied",
-    "", "", "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Signature-Input",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "OData-EntityId",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Hobareg",
-    "", "", "",
+    "",
+    "",
+    "",
     "Repr-Digest",
-    "", "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Replay-Nonce",
-    "", "",
+    "",
+    "",
     "Label",
-    "", "", "", "", "", "", "", "", "",
-    "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Transfer-Encoding",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "NEL",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "TTL",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "Memento-Datetime",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "", "",
-    "", "", "", "", "", "", "", "",
-    "MIME-Version"
-  };
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "MIME-Version"};
 
-const char *
-http_lookup_header (register const char *str, register size_t len)
-{
-  if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
-    {
-      register unsigned int key = http_hash_header (str, len);
+const char *http_lookup_header(register const char *str, register size_t len) {
+    if ( len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH ) {
+        register unsigned int key = http_hash_header(str, len);
 
-      if (key <= MAX_HASH_VALUE)
-        {
-          register const char *s = http_headerlist[key];
+        if ( key <= MAX_HASH_VALUE ) {
+            register const char *s = http_headerlist[key];
 
-          if (*str == *s && !strncmp (str + 1, s + 1, len - 1) && s[len] == '\0')
-            return s;
+            if ( *str == *s && !strncmp(str + 1, s + 1, len - 1) &&
+                 s[len] == '\0' )
+                return s;
         }
     }
-  return 0;
+    return 0;
 }
 #line 185 "HTTP_fields.gperf"
-
 
 struct header_hashset {
     /* a buffer containing all header values, pointed to by elements in @arr */
@@ -394,14 +550,14 @@ struct header_hashset {
     char *value_storage_ptr;
 };
 
-const size_t arr_len  = MAX_HASH_VALUE;
+const size_t arr_len = MAX_HASH_VALUE;
 const size_t arr_size = arr_len * sizeof(struct header_value);
 
 extern inline struct header_hashset *init_hashset(void) {
     /* just an array of struct http_header*, the index for a header string @str
      * is given by http_hash_header(str, strlen(str)) */
     struct header_hashset *set = malloc(sizeof(struct header_hashset));
-    set->arr                   = malloc(arr_size);
+    set->arr = malloc(arr_size);
     memset(set->arr, 0, arr_size);
     /* TODO: can initialize in O(1) */
     set->value_storage_ptr = set->value_storage;
@@ -443,7 +599,7 @@ int http_set_header(struct header_hashset *set, const char *name, int name_len,
         if ( key <= MAX_HASH_VALUE ) {
             memcpy(set->value_storage_ptr, value, value_len);
 
-            set->arr[key].value     = set->value_storage_ptr;
+            set->arr[key].value = set->value_storage_ptr;
             set->arr[key].value_len = value_len;
 
             set->value_storage_ptr += value_len;

@@ -117,7 +117,7 @@ bool is_conf_valid(config conf) {
     bool timeout_valid;
 
     handler_exists = conf.handler != NULL;
-    timeout_valid  = conf.timeout.tv_sec > 0 || conf.timeout.tv_usec > 0;
+    timeout_valid = conf.timeout.tv_sec > 0 || conf.timeout.tv_usec > 0;
 
     return handler_exists & timeout_valid;
 }
@@ -133,12 +133,12 @@ int init_server(config conf) {
     evutil_make_socket_nonblocking(main_sockfd);
 
     struct event_loop base_loop = {
-        .listen_sockfd   = main_sockfd,
+        .listen_sockfd = main_sockfd,
         .default_timeout = conf.timeout,
-        .read_cb         = recv_cb,
-        .write_cb        = send_cb,
-        .close_conn_cb   = close_con_cb,
-        .new_conn_cb     = accept_cb,
+        .read_cb = recv_cb,
+        .write_cb = send_cb,
+        .close_conn_cb = close_con_cb,
+        .new_conn_cb = accept_cb,
     };
 
     /* doesn't return until the server terminates */
@@ -174,14 +174,14 @@ void accept_cb(socket_t sockfd, int flags, void *ev_loop) {
 
 void close_con_cb(socket_t sockfd, int flags, void *arg) {
     LOG_DEBUG();
-    struct client_data *con_data   = (struct client_data *)arg;
-    struct recv_buffer *recv_buf   = con_data->recv_buf;
+    struct client_data *con_data = (struct client_data *)arg;
+    struct recv_buffer *recv_buf = con_data->recv_buf;
     struct queue       *send_queue = &con_data->send_queue;
 
-    bool timed_out              = flags & TIMEOUT;
+    bool timed_out = flags & TIMEOUT;
     bool server_close_requested = flags & SERV_CON_CLOSE;
-    bool client_closed_con      = flags & CLIENT_CON_CLOSE;
-    bool unsent_data_exists     = !is_empty(send_queue);
+    bool client_closed_con = flags & CLIENT_CON_CLOSE;
+    bool unsent_data_exists = !is_empty(send_queue);
 
     if ( timed_out ) LOG_DEBUG("timed_out");
     if ( unsent_data_exists ) LOG_DEBUG("unsent_data_exis");
@@ -350,7 +350,7 @@ static inline int parse_content(struct client_data *con_data) {
 void recv_cb(socket_t sockfd, int flags, void *arg) {
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
-    size_t             *bytes_parsed   = &con_data->recv_buf->bytes_parsed;
+    size_t             *bytes_parsed = &con_data->recv_buf->bytes_parsed;
     size_t             *bytes_received = &con_data->recv_buf->bytes_received;
 
     /* this function calls recv() once, populates con_data->recv_buf, and
@@ -501,7 +501,7 @@ int terminate_connection(struct client_data *con_data, int flags) {
 }
 
 int recv_data(socket_t sockfd, struct client_data *con_data) {
-    ev_ssize_t          nbytes   = 0;
+    ev_ssize_t          nbytes = 0;
     struct recv_buffer *recv_buf = con_data->recv_buf;
 
     nbytes = recv(sockfd, recv_buf->buffer + recv_buf->bytes_received,
@@ -650,7 +650,7 @@ void http_respond_builtin_status(struct client_data *con_data,
     LOG_DEBUG();
     http_res     response;
     size_t       init_file_content_cap = INIT_SEND_BUFFER_CAPACITY;
-    const size_t MAX_FILE_READ_SIZE    = 1 << 27;
+    const size_t MAX_FILE_READ_SIZE = 1 << 27;
     char message_filepath[1024]; /* arbitrary size, should be big enough for
                                    any path */
     int status;
@@ -674,7 +674,7 @@ void http_respond_builtin_status(struct client_data *con_data,
 
     LOG_DEBUG("sending error from filename: %s", message_filepath);
 
-    content_len    = 0;
+    content_len = 0;
     FILE *msg_file = fopen(message_filepath, "r");
     if ( !msg_file ) {
         LOG_ABORT("attempted to open %s. fopen: %s", message_filepath,
@@ -708,12 +708,12 @@ void http_respond_builtin_status(struct client_data *con_data,
 #define NUM_DIGITS(num) ((int)(log10((double)num) + 1))
 
     struct http_header  headers[3];
-    struct http_header *content_len_header  = &headers[0],
-                       *connection_header   = &headers[1],
+    struct http_header *content_len_header = &headers[0],
+                       *connection_header = &headers[1],
                        *content_type_header = &headers[2];
 
     response.status_code = status_code;
-    response.message     = file_contents_buf;
+    response.message = file_contents_buf;
     response.message_len = content_len;
     response.headers_arr = headers;
     response.num_headers = ARR_SIZE(headers);
@@ -768,8 +768,8 @@ static inline int init_client_request(struct client_data *con_data) {
     con_data->request = calloc(1, sizeof(*con_data->request));
     if ( !con_data->request ) return EXIT_FAILURE;
 
-    con_data->request->headers      = init_hashset();
-    con_data->request->path         = malloc(INIT_PATH_BUFFER_SIZE);
+    con_data->request->headers = init_hashset();
+    con_data->request->path = malloc(INIT_PATH_BUFFER_SIZE);
     con_data->request->path_buf_cap = INIT_PATH_BUFFER_SIZE;
 
     return EXIT_SUCCESS;
@@ -901,7 +901,7 @@ static inline void destroy_client(struct client_data *con_data) {
 }
 
 static inline void reset_http_req(http_req *request) {
-    struct header_hashset *headers     = request->headers;
+    struct header_hashset *headers = request->headers;
     char                  *message_buf = request->message;
 
     reset_header_hashset(headers);
@@ -993,8 +993,8 @@ struct addrinfo *get_local_addrinfo(const char *restrict port) {
 
     memset(&hints, 0, sizeof hints);
     hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family   = AF_UNSPEC;
-    hints.ai_flags    = AI_PASSIVE;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_flags = AI_PASSIVE;
 
     status = getaddrinfo(NULL, port, &hints, &res);
 

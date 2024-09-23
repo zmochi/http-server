@@ -57,6 +57,9 @@
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
 
+/* suppress unused argument warning */
+#define SUPPRESS_UNUSED(arg) ((void)arg)
+
 /**
  * @brief copies and formats an array of headers into a buffer
  *

@@ -12,8 +12,6 @@
 
 typedef evutil_socket_t socket_t;
 
-typedef void (*ev_callback_fn)(socket_t socket, int flags, void *arg);
-
 /* flags to pass to libevent when calling event_new, for each possible type of
  * event relevant for the HTTP server */
 enum ev_type {
@@ -26,13 +24,15 @@ enum ev_type {
 #define SHORT_SET_LEFTMOST_BIT(bit) (1 << (CHAR_BIT * sizeof(short) - bit - 1))
 /* flags that an event callback can receive, must be set from left otherwise
  * they collide with event loop library flags */
-enum ev_flags {
+enum ev_flags : uint32_t {
     /* enums are guaranteed to have max size of int, bigger than short */
     TIMEOUT = SHORT_SET_LEFTMOST_BIT(0), /* should not be passed manually. this
                 is an event loop indication of timeout */
-    SERV_CON_CLOSE   = SHORT_SET_LEFTMOST_BIT(1),
+    SERV_CON_CLOSE = SHORT_SET_LEFTMOST_BIT(1),
     CLIENT_CON_CLOSE = SHORT_SET_LEFTMOST_BIT(2),
 };
+
+typedef void (*ev_callback_fn)(socket_t socket, enum ev_flags flags, void *arg);
 
 /* private structs, end-user should only pass from/to the wrapper's methods */
 struct event_base;
@@ -89,7 +89,7 @@ void ev_remove_conn(struct conn_data *conn);
  *
  * @param conn connection to schedule the event on
  * @param ev_type type of event, from `enum ev_type`
- * @param flags flags from `enum ev_flags` to pass to woken event
+ * @param flags bitmask of flags from `enum ev_flags` to pass to woken event
  */
 void event_wake(struct conn_data *conn, enum ev_type ev_type,
                 enum ev_flags flags);

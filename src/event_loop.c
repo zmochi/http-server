@@ -95,6 +95,7 @@ void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
  * @brief see _ev_close_conn_cb documentation
  */
 void _ev_write_cb(socket_t socket, short flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct conn_data *conn_data = (struct conn_data *)arg;
 
     conn_data->write_cb(socket, 0, conn_data->user_cb_arg);
@@ -104,6 +105,7 @@ void _ev_write_cb(socket_t socket, short flags, void *arg) {
  * @brief see _ev_close_conn_cb documentation
  */
 void _ev_read_cb(socket_t socket, short flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct conn_data *conn_data = (struct conn_data *)arg;
     conn_data->read_cb(socket, 0, conn_data->user_cb_arg);
 }
@@ -113,6 +115,7 @@ void _ev_read_cb(socket_t socket, short flags, void *arg) {
  * `struct event_loop`
  */
 void _ev_accept_cb(socket_t socket, short flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct event_loop *ev_loop = (struct event_loop *)arg;
     ev_loop->new_conn_cb(socket, 0, ev_loop);
 }
@@ -162,8 +165,7 @@ struct conn_data *ev_add_conn(struct event_loop *ev_loop, socket_t socket,
     struct timeval   *client_timeout = &ev_loop->default_timeout;
 
     ev_callback_fn read_cb = ev_loop->read_cb, write_cb = ev_loop->write_cb,
-                   close_conn_cb = ev_loop->close_conn_cb,
-                   new_conn_cb = ev_loop->new_conn_cb;
+                   close_conn_cb = ev_loop->close_conn_cb;
 
     _VALIDATE_LOGIC(ev_loop->base != NULL,
                     "base field of `struct event_loop` should be set by "
@@ -234,7 +236,11 @@ void event_wake(struct conn_data *ev_data, enum ev_type ev_type,
             LOGIC_ERR("Passed non-existent event type.");
     }
 
-    event_active(event_to_wake, flags, 0);
+    _VALIDATE_LOGIC(
+        sizeof(int) >= sizeof(enum ev_flags),
+        "Conversion of enum ev_flags to int for libevent loses information");
+
+    event_active(event_to_wake, (int)flags, 0);
 }
 
 struct event *add_event(struct event_base *base, socket_t socket,

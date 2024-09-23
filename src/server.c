@@ -15,8 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static config         server_conf;
-static struct timeval CLIENT_TIMEOUT;
+static config server_conf;
 
 #define CRLF "\r\n"
 
@@ -36,8 +35,8 @@ typedef enum {
 
 struct addrinfo *get_local_addrinfo(const char *port);
 int              local_socket_bind_listen(const char *port);
-void             accept_cb(socket_t sockfd, int flags, void *arg);
-void             send_cb(socket_t sockfd, int flags, void *arg);
+void             accept_cb(socket_t sockfd, enum ev_flags flags, void *arg);
+void             send_cb(socket_t sockfd, enum ev_flags flags, void *arg);
 
 /**
  * @brief Callback function to read data sent from client.
@@ -54,7 +53,7 @@ void             send_cb(socket_t sockfd, int flags, void *arg);
  * always 0
  * @param arg ptr to struct client_data of connection, set in accept_cb
  */
-void recv_cb(socket_t sockfd, int flags, void *args);
+void recv_cb(socket_t sockfd, enum ev_flags flags, void *args);
 
 /**
  * @brief Callback function that handles closing connections
@@ -72,7 +71,7 @@ void recv_cb(socket_t sockfd, int flags, void *args);
  * connection, and TIMEOUT indicates the connection timed out.
  * @param arg ptr to struct client_data of connection, set in accept_cb
  */
-void close_con_cb(socket_t sockfd, int flags, void *arg);
+void close_con_cb(socket_t sockfd, enum ev_flags flags, void *arg);
 
 /**
  * @brief Receives pending data in @sockfd into the recv buffer in @con_data
@@ -86,15 +85,16 @@ void close_con_cb(socket_t sockfd, int flags, void *arg);
  */
 int recv_data(socket_t sockfd, struct client_data *con_data);
 
-int  http_respond(struct client_data *con_data, http_res *response);
-void http_respond_builtin_status(struct client_data *con_data,
-                                 http_status_code    status_code,
-                                 int                 http_res_flags);
-static inline int parse_request(struct client_data *con_data);
-static inline int parse_content(struct client_data *con_data);
+enum func_return_codes http_respond(struct client_data *con_data,
+                                    http_res           *response);
+void                   http_respond_builtin_status(struct client_data *con_data,
+                                                   http_status_code    status_code,
+                                                   enum ev_flags       http_res_flags);
+static inline enum http_req_status parse_request(struct client_data *con_data);
+static inline enum http_req_status parse_content(struct client_data *con_data);
 
 static void reset_http_req(http_req *request);
-int         terminate_connection(struct client_data *con_data, int flags);
+int terminate_connection(struct client_data *con_data, enum ev_flags flags);
 struct client_data *add_client(struct event_loop *ev_loop, socket_t socket);
 static inline void  destroy_client(struct client_data *con_data);
 
@@ -149,7 +149,8 @@ int init_server(config conf) {
     return EXIT_SUCCESS;
 }
 
-void accept_cb(socket_t sockfd, int flags, void *ev_loop) {
+void accept_cb(socket_t sockfd, enum ev_flags flags, void *ev_loop) {
+    SUPPRESS_UNUSED(flags);
     // sockaddr big enough for either IPv4 or IPv6
     // contains info about connection
     struct sockaddr_storage *sockaddr =
@@ -167,15 +168,15 @@ void accept_cb(socket_t sockfd, int flags, void *ev_loop) {
     evutil_make_socket_nonblocking(incoming_sockfd);
 
     LOG_DEBUG("allocating con_data");
-    struct client_data *con_data = add_client(ev_loop, incoming_sockfd);
+    add_client(ev_loop, incoming_sockfd);
 
     free(sockaddr);
 }
 
-void close_con_cb(socket_t sockfd, int flags, void *arg) {
+void close_con_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
+    SUPPRESS_UNUSED(sockfd);
     LOG_DEBUG();
     struct client_data *con_data = (struct client_data *)arg;
-    struct recv_buffer *recv_buf = con_data->recv_buf;
     struct queue       *send_queue = &con_data->send_queue;
 
     bool timed_out = flags & TIMEOUT;
@@ -213,7 +214,8 @@ void close_con_cb(socket_t sockfd, int flags, void *arg) {
     printf("\n");
 }
 
-void send_cb(socket_t sockfd, int flags, void *arg) {
+void send_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     LOG_DEBUG("send_cb");
 
     struct client_data *con_data = (struct client_data *)arg;
@@ -230,7 +232,7 @@ void send_cb(socket_t sockfd, int flags, void *arg) {
 
     /* send pending responses */
     struct send_buffer send_buf = *peek_send_buf(&con_data->send_queue);
-    size_t             nbytes = 0, total_bytes = 0;
+    ev_ssize_t         nbytes = 0;
 
     nbytes = send(sockfd, send_buf.buffer + send_buf.bytes_sent,
                   send_buf.actual_len - send_buf.bytes_sent, 0);
@@ -287,7 +289,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
         // TODO out of memory err in handler_buf_realloc
         switch ( status ) {
             case -2:
-                http_respond_builtin_status(con_data, Request_Entity_Too_Large,
+                http_respond_builtin_status(con_data, Content_Too_Large,
                                             SERV_CON_CLOSE);
                 terminate_connection(con_data, SERV_CON_CLOSE);
         }
@@ -298,36 +300,37 @@ int http_handle_incomplete_req(struct client_data *con_data) {
 
 /**
  * @brief parses request that starts at @con_data->recv_buf->buffer, with
- * length
- * @con_data->recv_buf->bytes_received and fills @con_data->request with
+ * length @con_data->recv_buf->bytes_received and fills @con_data->request with
  * necessary information.
  *
  * @param con_data connection data to parse from and to
- * @return one of `enum http_req_props` from parser.h
+ * @return one of `enum http_req_status` from parser.h
  */
-static inline int parse_request(struct client_data *con_data) {
+static inline enum http_req_status parse_request(struct client_data *con_data) {
     const char *req_path;
     size_t      req_path_len;
 
-    int status = http_parse_request(
+    enum http_req_status status = http_parse_request(
         con_data->recv_buf->buffer, con_data->recv_buf->bytes_received,
         &con_data->request->method, &req_path, &req_path_len,
         &con_data->request->minor_ver, con_data->request->headers,
         &con_data->recv_buf->bytes_parsed);
 
-    if ( con_data->request->method == M_UNKNOWN ) return HTTP_BAD_REQ;
+    if ( status != HTTP_OK ) return status;
 
-    /* TODO: realloc path buffer as necessary. leaving this as is for now
-     * because future memory pool implementation should do this */
+    /* from here status == HTTP_OK */
+
+    /* failsafe */
     if ( !con_data->request->path )
         LOG_ABORT("path buffer not allocated for connection request struct");
+
     memcpy(con_data->request->path, req_path, req_path_len);
     con_data->request->path_len = req_path_len;
 
     return status;
 }
 
-static inline int parse_content(struct client_data *con_data) {
+static inline enum http_req_status parse_content(struct client_data *con_data) {
     struct header_value *content_len_header = http_get_header(
         con_data->request->headers, "Content-Length", strlen("Content-Length"));
     if ( content_len_header == NULL )
@@ -351,11 +354,11 @@ static inline int parse_content(struct client_data *con_data) {
         &con_data->request->message_length);
 }
 
-void recv_cb(socket_t sockfd, int flags, void *arg) {
+void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct client_data *con_data = (struct client_data *)arg;
     int                 status;
     size_t             *bytes_parsed = &con_data->recv_buf->bytes_parsed;
-    size_t             *bytes_received = &con_data->recv_buf->bytes_received;
 
     /* this function calls recv() once, populates con_data->recv_buf, and
      * returns appropriate error codes. If there's still data to read after
@@ -402,6 +405,14 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
                 http_handle_incomplete_req(con_data);
                 return;
 
+            case HTTP_BAD_METHOD:
+                http_respond_builtin_status(con_data, Method_Not_Allowed, 0);
+                return;
+
+            case HTTP_URI_TOO_LONG:
+                http_respond_builtin_status(con_data, URI_Too_Long, 0);
+                return;
+
             case HTTP_OK:
                 break;
 
@@ -433,7 +444,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         case HTTP_ENTITY_TOO_LARGE:
             /* closes connection if entity too large, since there is no
              * space to process more additional requests */
-            http_respond_builtin_status(con_data, Request_Entity_Too_Large,
+            http_respond_builtin_status(con_data, Content_Too_Large,
                                         SERV_CON_CLOSE);
             return;
 
@@ -493,7 +504,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
     /* finished processing a single request. */
 }
 
-int terminate_connection(struct client_data *con_data, int flags) {
+int terminate_connection(struct client_data *con_data, enum ev_flags flags) {
 
     con_data->close_requested = true;
 
@@ -537,27 +548,32 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
 }
 
 /**
- * @brief [TODO:description]
- * after this functions returns, it is safe to free all data related to
- * @response and @response itself
+ * @brief sends response to client in @con_data.
  *
- * @param con_data [TODO:parameter]
- * @param response [TODO:parameter]
- * @return [TODO:return]
+ * after this functions returns, it is safe to free all data related to
+ * @response and @response itself.
+ * if either response->message is NULL or response->message_len is 0, no content
+ * is sent with request
+ *
+ * @param con_data client to send data to
+ * @param response response to send
+ * @return either `SUCCESS` or `MAX_BUF_SIZE_EXCEEDED` from `enum
+ * func_return_codes` if response is too large
  */
-int http_respond(struct client_data *con_data, http_res *response) {
-    bool message_exists = response->message != NULL;
+enum func_return_codes http_respond(struct client_data *con_data,
+                                    http_res           *response) {
+    bool message_exists =
+        response->message != NULL || response->message_len != 0;
     /* the struct send_buffer and associated buffer will be free'd in
      * send_cb. INIT_SEND_BUFFER_CAPACITY must be big enough for
      * HTTP_RESPONSE_BASE_FMT after its been formatted. */
     struct send_buffer *new_send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
     if ( !new_send_buf ) HANDLE_ALLOC_FAIL();
 
-    char       date[128]; // temporary buffer to pass date string
-    int        status_code = response->status_code;
-    int        status;
-    size_t     buflen, bytes_written = 0;
-    ev_ssize_t ret, string_len;
+    char             date[128]; // temporary buffer to pass date string
+    http_status_code status_code = response->status_code;
+    size_t           buflen, bytes_written = 0;
+    ev_ssize_t       ret;
 
     ret = strftime_gmtformat(date, sizeof(date));
     catchExcp(ret != EXIT_SUCCESS,
@@ -646,11 +662,11 @@ int http_respond(struct client_data *con_data, http_res *response) {
  *
  * @param con_data client to send response to
  * @param status_code status code of the response
- * @param http_res_flags a bitmask of flags from enum http_res_flag
+ * @param http_res_flags a bitmask of flags from `enum ev_flags`
  */
 void http_respond_builtin_status(struct client_data *con_data,
                                  http_status_code    status_code,
-                                 int                 http_res_flags) {
+                                 enum ev_flags       http_res_flags) {
     LOG_DEBUG();
     http_res     response;
     size_t       init_file_content_cap = INIT_SEND_BUFFER_CAPACITY;
@@ -671,10 +687,6 @@ void http_respond_builtin_status(struct client_data *con_data,
     /* create path string of HTTP response with provided status code */
     ret = snprintf(message_filepath, ARR_SIZE(message_filepath), "%s/%d.html",
                    server_conf.ROOT_PATH, status_code);
-    catchExcp(ret > ARR_SIZE(message_filepath),
-              "snprintf: couldn't write html "
-              "filename to buffer\n",
-              1);
     if ( ret < 0 ) {
         LOG_ABORT("snprintf: couldn't format content filepath in response: %s",
                   strerror(errno));
@@ -686,31 +698,32 @@ void http_respond_builtin_status(struct client_data *con_data,
     content_len = 0;
     FILE *msg_file = fopen(message_filepath, "r");
     if ( !msg_file ) {
-        LOG_ABORT("attempted to open %s. fopen: %s", message_filepath,
-                  strerror(errno));
-    }
+        /* no html file for response content, so don't send any */
+        content_len = 0;
+    } else {
 
-    while ( (ret = load_file_to_buf(msg_file, file_contents_buf,
-                                    init_file_content_cap, &content_len)) >=
-            0 ) {
-        /* resize buffer as needed, if file hasn't been fully read */
-        status =
-            handler_buf_realloc(&file_contents_buf, &init_file_content_cap,
-                                MAX_FILE_READ_SIZE, init_file_content_cap * 2);
+        while ( (ret = load_file_to_buf(msg_file, file_contents_buf,
+                                        init_file_content_cap, &content_len)) >=
+                0 ) {
+            /* resize buffer as needed, if file hasn't been fully read */
+            status = handler_buf_realloc(
+                &file_contents_buf, &init_file_content_cap, MAX_FILE_READ_SIZE,
+                init_file_content_cap * 2);
 
-        if ( status == -2 ) {
-            LOG_ERR("file at %s exceeds max read size, aborting.",
-                    message_filepath);
-            free(file_contents_buf);
-            return;
+            if ( status == -2 ) {
+                LOG_ERR("file at %s exceeds max read size, aborting.",
+                        message_filepath);
+                free(file_contents_buf);
+                return;
+            }
         }
-    }
 
-    if ( ret == -1 && fclose(msg_file) != 0 ) {
-        /* reached EOF, failed closing msg_file */
-        LOG_ABORT("fclose: %s", strerror(errno));
-    } else if ( ret <= -2 ) {
-        LOG_ABORT("error in load_file_to_buf");
+        if ( ret == -1 && fclose(msg_file) != 0 ) {
+            /* reached EOF, failed closing msg_file */
+            LOG_ABORT("fclose: %s", strerror(errno));
+        } else if ( ret <= -2 ) {
+            LOG_ABORT("error in load_file_to_buf");
+        }
     }
 
 /* gets base 10 number of digits in a natural number */
@@ -777,8 +790,10 @@ static inline int init_client_request(struct client_data *con_data) {
     if ( !con_data->request ) return EXIT_FAILURE;
 
     con_data->request->headers = init_hashset();
-    con_data->request->path = malloc(INIT_PATH_BUFFER_SIZE);
-    con_data->request->path_buf_cap = INIT_PATH_BUFFER_SIZE;
+    if ( con_data->request->headers ) return EXIT_FAILURE;
+    con_data->request->path = malloc(URI_PATH_LEN_LIMIT);
+    if ( con_data->request->path ) return EXIT_FAILURE;
+    con_data->request->path_buf_cap = URI_PATH_LEN_LIMIT;
 
     return EXIT_SUCCESS;
 }
@@ -868,8 +883,6 @@ static inline int destroy_client_event(struct client_data *con_data) {
 }
 
 struct client_data *add_client(struct event_loop *ev_loop, socket_t socket) {
-    int send_buffer_capacity = INIT_SEND_BUFFER_CAPACITY;
-
     struct client_data *con_data = calloc(1, sizeof(struct client_data));
     if ( !con_data ) HANDLE_ALLOC_FAIL();
     con_data->sockfd = socket;
@@ -931,8 +944,7 @@ static inline struct send_buffer *peek_send_buf(struct queue *queue) {
 }
 
 int finish_request_processing(struct client_data *con_data) {
-    http_req *request = con_data->request;
-
+    SUPPRESS_UNUSED(con_data);
     return EXIT_SUCCESS;
 }
 
@@ -945,7 +957,6 @@ int finish_request_processing(struct client_data *con_data) {
 socket_t local_socket_bind_listen(const char *restrict port) {
     struct addrinfo *servinfo = get_local_addrinfo(port);
     struct addrinfo *servinfo_next;
-    struct sockaddr *sockaddr = servinfo->ai_addr; // get_sockaddr(servinfo);
     int              status;
     socket_t         main_sockfd;
 

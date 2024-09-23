@@ -1,14 +1,14 @@
 #include <src/status_codes.h>
 
-const int   smallest_code = 100;
-const int   num_codes = 499;
-const char *status_codes_arr[];
+static const int   smallest_code = 100;
+static const int   num_codes = 499;
+static const char *status_codes_arr[];
 
 const char *stringify_statuscode(http_status_code status_code) {
     return status_codes_arr[status_code - smallest_code];
 }
 
-const char *status_codes_arr[] = {
+static const char *status_codes_arr[] = {
     // code: 100
     "Continue",
     // code: 101

@@ -23,7 +23,7 @@ struct header_value {
     unsigned int value_len;
 };
 
-enum http_header_props {
+enum http_header_props : uint32_t {
     MAX_NUM_HEADERS = 100,
     HEADER_VALUE_VALID = 2,
     HEADER_EXISTS = 4,

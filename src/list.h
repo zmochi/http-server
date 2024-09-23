@@ -1,7 +1,7 @@
-#include <src/container_of.h>
-
 #ifndef __LIST_H
 #define __LIST_H
+
+#include <src/container_of.h>
 
 struct list_item {
     struct list_item *prev, *next;
@@ -24,8 +24,8 @@ static inline void init_entry(struct list_item *entry) {
  */
 static inline void insert_entry(struct list_item *new, struct list_item *prev,
                                 struct list_item *next) {
-    new->next  = next;
-    new->prev  = prev;
+    new->next = next;
+    new->prev = prev;
     prev->next = new;
     next->prev = new;
 }

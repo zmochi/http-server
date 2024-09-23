@@ -116,11 +116,10 @@ int populate_headers_map(struct header_hashset *set,
  * @param expected_value_len expected value length
  * @return a bitmask of fields from `enum http_header_props` (from headers.h)
  */
-int http_extract_validate_header(struct header_hashset *set,
-                                 const char            *header_name,
-                                 unsigned int           header_name_len,
-                                 const char            *expected_value,
-                                 unsigned int           expected_value_len);
+enum http_header_props http_extract_validate_header(
+    struct header_hashset *set, const char *header_name,
+    unsigned int header_name_len, const char *expected_value,
+    unsigned int expected_value_len);
 /**
  * @brief reallocates buffer to new size, if not exceeding max_size
  *

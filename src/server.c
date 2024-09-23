@@ -790,9 +790,9 @@ static inline int init_client_request(struct client_data *con_data) {
     if ( !con_data->request ) return EXIT_FAILURE;
 
     con_data->request->headers = init_hashset();
-    if ( con_data->request->headers ) return EXIT_FAILURE;
+    if ( !con_data->request->headers ) return EXIT_FAILURE;
     con_data->request->path = malloc(URI_PATH_LEN_LIMIT);
-    if ( con_data->request->path ) return EXIT_FAILURE;
+    if ( !con_data->request->path ) return EXIT_FAILURE;
     con_data->request->path_buf_cap = URI_PATH_LEN_LIMIT;
 
     return EXIT_SUCCESS;

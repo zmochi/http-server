@@ -76,6 +76,7 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
         return FILE_FAIL;
     }
 
+    /* not everything was read */
     if ( ret < capacity - last ) {
         if ( ferror(file) ) {
             LOG_ERR("fread: %s", strerror(errno));
@@ -107,12 +108,11 @@ int populate_headers_map(struct header_hashset *set,
     return 0;
 }
 
-int http_extract_validate_header(struct header_hashset *set,
-                                 const char *restrict header_name,
-                                 unsigned int header_name_len,
-                                 const char *restrict expected_value,
-                                 unsigned int expected_value_len) {
-    short header_flags = 0;
+enum http_header_props http_extract_validate_header(
+    struct header_hashset *set, const char *restrict header_name,
+    unsigned int           header_name_len, const char *restrict expected_value,
+    unsigned int           expected_value_len) {
+    enum http_header_props header_flags = 0;
 
     struct header_value *header_value =
         http_get_header(set, header_name, header_name_len);

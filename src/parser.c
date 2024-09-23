@@ -13,7 +13,7 @@ enum http_method get_method_code(const char *method) {
     struct method_str_code known_method;
     size_t                 num_methods = ARR_SIZE(methods_strings);
 
-    for ( int i = 0; i < num_methods; i++ ) {
+    for ( unsigned int i = 0; i < num_methods; i++ ) {
         known_method = methods_strings[i];
 
         if ( strncmp(method, known_method.method_str,
@@ -71,7 +71,7 @@ http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
      * parser module should definitely check if request is HTTP compliant */
     const http_req internal_request = {.headers = header_set,
                                        .method = *method,
-                                       .path = *path,
+                                       .path = (char *)*path,
                                        .path_len = *path_len,
                                        .message = NULL,
                                        .minor_ver = *minor_version,
@@ -96,18 +96,20 @@ enum http_req_status http_parse_content(const char *content_bufptr,
                                         size_t      content_len_header_valuelen,
                                         size_t      content_bufcap,
                                         size_t     *content_len) {
-    short      content_length_header_flags;
+    SUPPRESS_UNUSED(content_bufptr);
+
     ev_ssize_t extracted_content_len = str_to_positive_num(
         content_len_header_value, content_len_header_valuelen);
 
     if ( extracted_content_len < 0 ) return HTTP_BAD_REQ;
 
-    if ( extracted_content_len > content_bufcap ) return HTTP_ENTITY_TOO_LARGE;
+    if ( (size_t)extracted_content_len > content_bufcap )
+        return HTTP_ENTITY_TOO_LARGE;
 
-    if ( size_content_received < extracted_content_len )
+    if ( size_content_received < (size_t)extracted_content_len )
         return HTTP_INCOMPLETE_REQ;
 
-    *content_len = extracted_content_len;
+    *content_len = (size_t)extracted_content_len;
 
     return HTTP_OK;
 
@@ -133,9 +135,9 @@ bool is_request_HTTP_compliant(const http_req *request) {
     if ( request->minor_ver == 1 ) {
         const char *HOST_HEADER_NAME = "Host";
         /* host header is required on HTTP 1.1 */
-        short host_header_flags =
-            http_extract_validate_header(request->headers, HOST_HEADER_NAME,
-                                         strlen(HOST_HEADER_NAME), NULL, 0);
+        enum http_header_props host_header_flags = http_extract_validate_header(
+            request->headers, HOST_HEADER_NAME,
+            (unsigned int)strlen(HOST_HEADER_NAME), NULL, 0);
 
         if ( !(host_header_flags & HEADER_EXISTS) ) {
             return false;

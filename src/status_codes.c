@@ -1,7 +1,6 @@
 #include <src/status_codes.h>
 
 static const int   smallest_code = 100;
-static const int   num_codes = 499;
 static const char *status_codes_arr[];
 
 const char *stringify_statuscode(http_status_code status_code) {

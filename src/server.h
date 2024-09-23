@@ -1,4 +1,3 @@
-#include <src/event_loop.h>
 #include <src/headers.h>
 #include <src/parser.h>
 #include <src/queue.h>
@@ -11,9 +10,6 @@
 #include <sys/types.h>
 
 #endif
-
-/* libevent: */
-#include <event2/event.h>
 
 /* cross-platform, C standard libraries: */
 #include <inttypes.h>
@@ -40,7 +36,7 @@ struct recv_buffer {
 };
 
 struct client_data {
-    socket_t            sockfd;
+    int                 sockfd;
     struct conn_data   *event;
     struct queue        send_queue;
     struct recv_buffer *recv_buf;

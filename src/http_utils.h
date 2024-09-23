@@ -115,9 +115,9 @@ int populate_headers_map(struct header_hashset *set,
  */
 int http_extract_validate_header(struct header_hashset *set,
                                  const char            *header_name,
-                                 size_t                 header_name_len,
+                                 unsigned int           header_name_len,
                                  const char            *expected_value,
-                                 size_t                 expected_value_len);
+                                 unsigned int           expected_value_len);
 /**
  * @brief reallocates buffer to new size, if not exceeding max_size
  *
@@ -128,7 +128,7 @@ int http_extract_validate_header(struct header_hashset *set,
  * @return 0 on success, -2 if new_size is exceeded
  */
 int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
-                        ev_ssize_t new_size);
+                        size_t new_size);
 
 bool is_integer(const char str[], int str_len);
 

@@ -235,18 +235,18 @@ void send_cb(socket_t sockfd, int flags, void *arg) {
     nbytes = send(sockfd, send_buf.buffer + send_buf.bytes_sent,
                   send_buf.actual_len - send_buf.bytes_sent, 0);
 
-    if ( nbytes == SOCKET_ERROR ) { // TODO: better error handling
+    if ( nbytes == SOCKET_ERROR || nbytes < 0 ) { // TODO: better error handling
         LOG_ABORT("send: %s\n",
                   evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-    } else if ( nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
+    } else if ( (size_t)nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
         /* all data sent, get next send buffer in the queue.
          * if there are no more buffers and connection should be closed,
          * wake close event */
         if ( finished_sending(con_data) && con_data->close_requested )
             terminate_connection(con_data, SERV_CON_CLOSE);
-    } else if ( nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
+    } else if ( (size_t)nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
         // not everything was sent
-        peek_send_buf(&con_data->send_queue)->bytes_sent += nbytes;
+        peek_send_buf(&con_data->send_queue)->bytes_sent += (size_t)nbytes;
     } else {
         LOG_ABORT("unknown error while sending data");
     }
@@ -335,10 +335,14 @@ static inline int parse_content(struct client_data *con_data) {
          * to be a new request */
         return HTTP_OK;
 
-    size_t bytes_received_excluding_content =
+    ev_ssize_t bytes_received_excluding_content =
         con_data->request->message - con_data->recv_buf->buffer;
-    size_t size_content_received =
-        con_data->recv_buf->bytes_received - bytes_received_excluding_content;
+
+    if ( bytes_received_excluding_content < 0 ) {
+        LOG_ABORT("critical: request message points before buffer");
+    }
+    size_t size_content_received = con_data->recv_buf->bytes_received -
+                                   (size_t)bytes_received_excluding_content;
 
     return http_parse_content(
         con_data->request->message, size_content_received,
@@ -388,9 +392,8 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         /* parses everything preceding the content from request, populates
          * @con_data->request->headers with HTTP headers values copied from
          * request */
-        status = parse_request(con_data);
 
-        switch ( status ) {
+        switch ( parse_request(con_data) ) {
             case HTTP_BAD_REQ:
                 http_respond_builtin_status(con_data, Bad_Request, 0);
                 return;
@@ -421,9 +424,8 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
     /* continue parsing HTTP message content (or begin parsing if this is
      * the first pass). does not modify bytes_parsed unless completed
      * parsing (and returns HTTP_OK) */
-    status = parse_content(con_data);
 
-    switch ( status ) {
+    switch ( parse_content(con_data) ) {
         case HTTP_INCOMPLETE_REQ:
             http_handle_incomplete_req(con_data);
             return; /* wait for more data to become available */
@@ -460,8 +462,7 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
         return;
     }
 
-    status = http_respond(con_data, &response);
-    switch ( status ) {
+    switch ( http_respond(con_data, &response) ) {
         case SUCCESS:
             break; // success
 
@@ -476,8 +477,9 @@ void recv_cb(socket_t sockfd, int flags, void *arg) {
     /* if client specified Connection: close, close connection */
     if ( http_extract_validate_header(
              con_data->request->headers, CONNECTION_HEADER_NAME,
-             strlen(CONNECTION_HEADER_NAME), CONNECTION_CLOSE_VALUE,
-             strlen(CONNECTION_CLOSE_VALUE)) &
+             (unsigned int)strlen(CONNECTION_HEADER_NAME),
+             CONNECTION_CLOSE_VALUE,
+             (unsigned int)strlen(CONNECTION_CLOSE_VALUE)) &
          HEADER_VALUE_VALID ) {
         terminate_connection(con_data, SERV_CON_CLOSE);
     }
@@ -526,9 +528,11 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
         }
     } else if ( nbytes == 0 ) {
         return RECV_CLIENT_CLOSED_CON;
+    } else if ( nbytes < 0 ) {
+        LOG_ABORT("Unknown return value from recv()");
     }
 
-    recv_buf->bytes_received += nbytes;
+    recv_buf->bytes_received += (size_t)nbytes;
     return RECV_SUCCESS;
 }
 
@@ -569,16 +573,16 @@ int http_respond(struct client_data *con_data, http_res *response) {
                  con_data->request->minor_ver, status_code,
                  stringify_statuscode(status_code), server_conf.SERVNAME, date);
 
-    if ( ret >= buflen ) {
+    if ( ret < 0 ) {
+        LOG_ABORT("http_respond: snprintf: base_fmt: %s", strerror(errno));
+    } else if ( (size_t)ret >= buflen ) {
         LOG_ABORT("http_respond: Initial capacity of send buffer is not big "
                   "enough for the base HTTP response format");
         /* this really shouldn't happen and is permanently fixable by simply
          * increasing the initial capacity, so just exit */
-    } else if ( ret < 0 ) {
-        LOG_ABORT("http_respond: snprintf: base_fmt: %s", strerror(errno));
     }
 
-    bytes_written += ret;
+    bytes_written += (size_t)ret;
 
     // copy headers to send buffer:
     ret = -1;
@@ -605,7 +609,7 @@ int http_respond(struct client_data *con_data, http_res *response) {
         }
     }
 
-    bytes_written += ret;
+    bytes_written += (size_t)ret;
 
     // TODO: realloc buffer is capacity is not big enough
     memcpy(new_send_buf->buffer + bytes_written, CRLF, strlen(CRLF));
@@ -671,6 +675,11 @@ void http_respond_builtin_status(struct client_data *con_data,
               "snprintf: couldn't write html "
               "filename to buffer\n",
               1);
+    if ( ret < 0 ) {
+        LOG_ABORT("snprintf: couldn't format content filepath in response: %s",
+                  strerror(errno));
+    } else if ( (size_t)ret > ARR_SIZE(message_filepath) )
+        LOG_ABORT("snprintf: couldn't write html filename to buffer");
 
     LOG_DEBUG("sending error from filename: %s", message_filepath);
 
@@ -705,7 +714,7 @@ void http_respond_builtin_status(struct client_data *con_data,
     }
 
 /* gets base 10 number of digits in a natural number */
-#define NUM_DIGITS(num) ((int)(log10((double)num) + 1))
+#define NUM_DIGITS(num) ((unsigned int)(log10((double)num) + 1))
 
     struct http_header  headers[3];
     struct http_header *content_len_header = &headers[0],
@@ -739,11 +748,8 @@ void http_respond_builtin_status(struct client_data *con_data,
     /* http_respond formats everything into a single message and allocates
      * memory for it. when http_respond returns, all memory allocated to
      * @response can be free'd */
-    status = http_respond(con_data, &response);
 
-    free(file_contents_buf);
-
-    switch ( status ) {
+    switch ( http_respond(con_data, &response) ) {
         case SUCCESS:
             break; // success
 
@@ -757,6 +763,8 @@ void http_respond_builtin_status(struct client_data *con_data,
         default:
             LOG_ABORT("unknown return code from http_respond");
     }
+
+    free(file_contents_buf);
 }
 
 /**
@@ -816,7 +824,7 @@ void destroy_send_buf(struct send_buffer *send_buf) {
  * @return EXIT_FAILURE on failure to allocate memory
  */
 static inline int init_client_recv_buf(struct client_data *con_data) {
-    int request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
+    unsigned int request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
 
     con_data->recv_buf = calloc(1, sizeof(*con_data->recv_buf));
     if ( !con_data->recv_buf ) return EXIT_FAILURE;
@@ -970,7 +978,7 @@ socket_t local_socket_bind_listen(const char *restrict port) {
             continue;
         }
 
-        status = listen(main_sockfd, BACKLOG);
+        status = listen(main_sockfd, (int)BACKLOG);
         if ( status < 0 ) {
             perror("listen");
             continue;

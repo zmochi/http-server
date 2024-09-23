@@ -1,17 +1,16 @@
 #include <src/headers.h>
+#include <src/http_limits.h>
 #include <src/http_utils.h>
 
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern const int BACKLOG;
-
 int strftime_gmtformat(char *buf, size_t bufcap) {
 
-    time_t     time_now = time(NULL);
-    struct tm *tm_info = gmtime(&time_now);
-    int        EXPECTED_FMT_LEN = 29;
+    time_t       time_now = time(NULL);
+    struct tm   *tm_info = gmtime(&time_now);
+    unsigned int EXPECTED_FMT_LEN = 29;
 
     /* strftime returns number of characters written to buf on success. The
      * format passed should always yield EXPECTED_FMT_LEN characters */
@@ -24,20 +23,24 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
 
 ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
                                char *buffer, size_t capacity) {
-    const int NO_MEM_ERR = -1;
-    size_t    bytes_written = 0;
+    /* temporary fix to make arithmetic between @capacity and @bytes_written
+     * legal */
+    if ( capacity > EV_SSIZE_MAX )
+        LOG_ABORT("Massive capacity reached, aborting");
+    const int  NO_MEM_ERR = -1;
+    ev_ssize_t bytes_written = 0;
     /* the buffer start point and buffer capacity change while writing to the
      * buffer. these variables hold the effective buffer and its effective
      * capacity */
-    size_t eff_bufcap;
-    char  *eff_buf;
-    int    ret;
+    ev_ssize_t eff_bufcap;
+    char      *eff_buf;
+    int        ret;
 
     static const char *HEADER_FMT = "%s: %s\r\n";
 
     for ( size_t i = 0; i < num_headers; i++ ) {
         struct http_header header = headers[i];
-        eff_bufcap = capacity - bytes_written;
+        eff_bufcap = (ev_ssize_t)capacity - bytes_written;
         eff_buf = buffer + bytes_written;
 
         /* snprintf should be fine since HTTP standard disallows null bytes in
@@ -45,10 +48,10 @@ ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,
         ret = snprintf(eff_buf, eff_bufcap, HEADER_FMT, header.name,
                        header.value);
 
-        if ( ret > eff_bufcap ) { // out of memory, capacity too small
-            return NO_MEM_ERR;
-        } else if ( ret < 0 ) {
+        if ( ret < 0 ) {
             LOG_ABORT("snprintf: headers: %s", strerror(errno));
+        } else if ( ret > eff_bufcap ) { // out of memory, capacity too small
+            return NO_MEM_ERR;
         }
 
         bytes_written += ret;
@@ -62,17 +65,16 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
     const int FILE_FAIL = -2, FILE_EOF = -1;
     /* would prefer to mmap() file into memory but not cross-compatible that
      * way... */
-    size_t     ret_size_t, capacity = buf_capacity, last = *total_read;
-    ev_ssize_t ret;
+    size_t ret, capacity = buf_capacity, last = *total_read;
 
     /* read fread return value into an appropriate type: */
-    ret_size_t = fread(buf + last, sizeof(char), capacity - last, file);
-    if ( ret_size_t > EV_SSIZE_MAX ) {
+    ret = fread(buf + last, sizeof(char), capacity - last, file);
+
+    /* make sure it's safe to cast ret in return statement */
+    if ( ret > EV_SSIZE_MAX ) {
         LOG_ERR("fread: file contains more data than ssize_t can handle");
         return FILE_FAIL;
     }
-    /* return value of fread fits in ssize_t, cast it: */
-    ret = ret_size_t;
 
     if ( ret < capacity - last ) {
         if ( ferror(file) ) {
@@ -89,13 +91,15 @@ ev_ssize_t load_file_to_buf(FILE *file, char *restrict buf, size_t buf_capacity,
 
     /* haven't reached EOF, caller must increase buffer capacity */
     *total_read += ret;
-    return ret;
+
+    /* if statement above makes sure this cast is legal */
+    return (ev_ssize_t)ret;
 }
 
 int populate_headers_map(struct header_hashset *set,
                          struct http_header headers[], size_t num_headers) {
 
-    for ( int i = 0; i < num_headers; i++ ) {
+    for ( unsigned int i = 0; i < num_headers; i++ ) {
         struct http_header header = headers[i];
         http_set_header(set, header.name, header.name_len, header.value,
                         header.value_len);
@@ -105,17 +109,17 @@ int populate_headers_map(struct header_hashset *set,
 
 int http_extract_validate_header(struct header_hashset *set,
                                  const char *restrict header_name,
-                                 size_t header_name_len,
+                                 unsigned int header_name_len,
                                  const char *restrict expected_value,
-                                 size_t expected_value_len) {
+                                 unsigned int expected_value_len) {
     short header_flags = 0;
 
     struct header_value *header_value =
         http_get_header(set, header_name, header_name_len);
     if ( header_value == NULL ) return header_flags;
 
-    char *header_value_buf = header_value->value;
-    int   header_value_len = header_value->value_len;
+    char        *header_value_buf = header_value->value;
+    unsigned int header_value_len = header_value->value_len;
 
     if ( header_value_len != 0 ) {
         header_flags |= HEADER_EXISTS;
@@ -133,7 +137,7 @@ int http_extract_validate_header(struct header_hashset *set,
 }
 
 int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
-                        ev_ssize_t new_size) {
+                        size_t new_size) {
     // instead of realloc we can use a deamortized buffer (which
     // requires 3x space allocation)
 
@@ -152,10 +156,9 @@ int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
 
 ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
     ev_ssize_t ret;
+    ret = snprintf(str, strcap, "%zu", num);
 
-    if ( (ret = snprintf(str, strcap, "%zu", num)) >= strcap ) {
-        return -1;
-    }
+    if ( ret < 0 || (size_t)ret >= strcap ) return -1;
 
     return ret;
 }
@@ -180,7 +183,7 @@ ev_ssize_t str_to_positive_num(const char *str, size_t strlen) {
     // TODO: verify this is not dumb
     if ( *endptr != '\x00' ) return -1;
 
-    return content_length;
+    return (ev_ssize_t)content_length;
 }
 
 /**

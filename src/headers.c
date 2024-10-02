@@ -592,8 +592,7 @@ struct header_value *http_get_header(struct header_hashset *set,
 }
 
 int http_set_header(struct header_hashset *set, const char *name,
-                    unsigned int name_len, const char *value,
-                    unsigned int value_len) {
+                    size_t name_len, const char *value, size_t value_len) {
     if ( name_len <= MAX_WORD_LENGTH && name_len >= MIN_WORD_LENGTH ) {
 
         unsigned int key = http_hash_header(name, name_len);

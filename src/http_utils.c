@@ -118,8 +118,8 @@ enum http_header_props http_extract_validate_header(
         http_get_header(set, header_name, header_name_len);
     if ( header_value == NULL ) return header_flags;
 
-    char        *header_value_buf = header_value->value;
-    unsigned int header_value_len = header_value->value_len;
+    char  *header_value_buf = header_value->value;
+    size_t header_value_len = header_value->value_len;
 
     if ( header_value_len != 0 ) {
         header_flags |= HEADER_EXISTS;

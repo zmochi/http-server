@@ -1,4 +1,5 @@
 #include <src/headers.h>
+#include <src/http_limits.h>
 #include <src/http_utils.h>
 #include <src/parser.h>
 /* for struct client_data, enum http_method, enum http_header_props */

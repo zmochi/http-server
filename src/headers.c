@@ -33,6 +33,7 @@
 #line 6 "HTTP_fields.gperf"
 
 #include <src/headers.h>
+#include <src/http_limits.h>
 #include <stdlib.h>
 #include <string.h>
 

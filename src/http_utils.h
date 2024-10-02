@@ -2,6 +2,7 @@
 #include <src/headers.h>
 
 #include <event2/util.h>
+#include <math.h> /* for NUM_DIGITS() macro */
 #include <stdio.h>
 
 #ifndef __HTTP_UTILS_H
@@ -59,6 +60,9 @@
 
 /* suppress unused argument warning */
 #define SUPPRESS_UNUSED(arg) ((void)arg)
+
+/* get number of digits in integer num */
+#define NUM_DIGITS(num) ((unsigned int)(log10((double)num) + 1))
 
 /**
  * @brief copies and formats an array of headers into a buffer

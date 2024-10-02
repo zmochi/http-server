@@ -1,10 +1,12 @@
+
+#ifndef __PARSER_H_
+#define __PARSER_H_
+
+#include <http.h>
 #include <src/headers.h>
 
 /* for strlen() */
 #include <string.h>
-
-#ifndef __PARSER_H_
-#define __PARSER_H_
 
 enum http_req_status {
     HTTP_OK,
@@ -13,18 +15,6 @@ enum http_req_status {
     HTTP_ENTITY_TOO_LARGE,
     HTTP_URI_TOO_LONG,
     HTTP_BAD_METHOD,
-};
-
-enum http_method {
-    M_GET,
-    M_HEAD,
-    M_POST,
-    M_PUT,
-    M_DELETE,
-    M_CONNECT,
-    M_OPTIONS,
-    M_TRACE,
-    M_UNKNOWN,
 };
 
 /* struct for associating HTTP method string with its enum code */
@@ -44,21 +34,6 @@ static struct method_str_code methods_strings[] = {
     structify_method(DELETE),  structify_method(CONNECT),
     structify_method(OPTIONS), structify_method(TRACE),
 };
-
-typedef struct {
-    /* an independent buffer holding the request path */
-    char            *path;
-    size_t           path_len, path_buf_cap;
-    enum http_method method;
-    int              minor_ver;
-    /* hashset of headers of HTTP req, each headers value is copied into a
-     * buffer inside this struct and is indepedent of the recv buffer */
-    struct header_hashset *headers;
-    size_t                 num_headers;
-    /* points to content of HTTP req (points inside recv_buffer) from client */
-    char  *message;
-    size_t message_length;
-} http_req;
 
 /**
  * @brief checks if request (that has everything up to its content parsed) is

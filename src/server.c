@@ -1,9 +1,11 @@
+#include <http.h>
 #include <src/event_loop.h>
 #include <src/headers.h>
 #include <src/http_limits.h>
 #include <src/http_utils.h>
 #include <src/parser.h>
 #include <src/queue.h>
+#include <src/response.h>
 #include <src/server.h>
 #include <src/status_codes.h>
 
@@ -14,9 +16,6 @@
 #include <string.h>
 
 static config server_conf;
-
-#define CRLF     "\r\n"
-#define CRLF_LEN (2)
 
 #define DFLT_TIMEOUT {.tv_sec = 5, .tv_usec = 0}
 
@@ -85,11 +84,9 @@ void close_con_cb(socket_t sockfd, enum ev_flags flags, void *arg);
  */
 int recv_data(socket_t sockfd, struct client_data *con_data);
 
-enum func_return_codes http_respond(struct client_data *con_data,
-                                    http_res           *response);
-void                   http_respond_builtin_status(struct client_data *con_data,
-                                                   http_status_code    status_code,
-                                                   enum ev_flags       http_res_flags);
+void http_respond_builtin_status(struct client_data *con_data,
+                                 http_status_code    status_code,
+                                 enum ev_flags       http_res_flags);
 static inline enum http_req_status parse_request(struct client_data *con_data);
 static inline enum http_req_status parse_content(struct client_data *con_data);
 
@@ -235,18 +232,20 @@ void send_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     ev_ssize_t         nbytes = 0;
 
     nbytes = send(sockfd, send_buf.buffer + send_buf.bytes_sent,
-                  send_buf.actual_len - send_buf.bytes_sent, 0);
+                  send_buf.bytes_written - send_buf.bytes_sent, 0);
 
     if ( nbytes == SOCKET_ERROR || nbytes < 0 ) { // TODO: better error handling
         LOG_ABORT("send: %s\n",
                   evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-    } else if ( (size_t)nbytes == send_buf.actual_len - send_buf.bytes_sent ) {
+    } else if ( (size_t)nbytes ==
+                send_buf.bytes_written - send_buf.bytes_sent ) {
         /* all data sent, get next send buffer in the queue.
          * if there are no more buffers and connection should be closed,
          * wake close event */
         if ( finished_sending(con_data) && con_data->close_requested )
             terminate_connection(con_data, SERV_CON_CLOSE);
-    } else if ( (size_t)nbytes < send_buf.actual_len - send_buf.bytes_sent ) {
+    } else if ( (size_t)nbytes <
+                send_buf.bytes_written - send_buf.bytes_sent ) {
         // not everything was sent
         peek_send_buf(&con_data->send_queue)->bytes_sent += (size_t)nbytes;
     } else {
@@ -473,7 +472,9 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
         return;
     }
 
-    switch ( http_respond(con_data, &response) ) {
+    struct send_buffer *send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
+
+    switch ( http_respond(send_buf, &response, server_conf.SERVNAME) ) {
         case SUCCESS:
             break; // success
 
@@ -545,155 +546,6 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
 
     recv_buf->bytes_received += (size_t)nbytes;
     return RECV_SUCCESS;
-}
-
-ev_ssize_t write_http_base_fmt(char *buffer, size_t bufcap, int minor_ver,
-                               http_status_code status_code,
-                               const char      *server_name) {
-    const char *HTTP_RESPONSE_BASE_FMT =
-        "HTTP/1.%d %d %s" CRLF "Server: %s" CRLF "Date: %s" CRLF;
-
-    char       date[128]; // temporary buffer to pass date string
-    ev_ssize_t ret;
-
-    ret = strftime_gmtformat(date, sizeof(date));
-    catchExcp(ret != EXIT_SUCCESS,
-              "strftime_gmtformat: couldn't write date into buffer", 1);
-
-    ret =
-        snprintf(buffer, bufcap, HTTP_RESPONSE_BASE_FMT, minor_ver, status_code,
-                 stringify_statuscode(status_code), server_name, date);
-
-    if ( ret < 0 ) {
-        LOG_ERR("snprintf: base_fmt: %s", strerror(errno));
-        return -1;
-    } else if ( (size_t)ret >= bufcap ) { /* >= instead of > since ret does not
-                                             include terminating null byte */
-        LOG_ERR("Initial capacity of send buffer is not big enough for the "
-                "base HTTP response format");
-        return -1;
-    }
-
-    /* returns number of bytes written not including null character */
-    return ret;
-}
-
-/**
- * @brief sends response to client in @con_data, adds Content-Length header if
- * message exists
- *
- * after this functions returns, it is safe to free all data related to
- * @response and @response itself.
- * if either response->message is NULL or response->message_len is 0, no content
- * is sent with request
- *
- * @param con_data client to send data to
- * @param response response to send
- * @return either `SUCCESS` or `MAX_BUF_SIZE_EXCEEDED` from `enum
- * func_return_codes` if response is too large
- */
-enum func_return_codes http_respond(struct client_data *con_data,
-                                    http_res           *response) {
-    /* the struct send_buffer and associated buffer will be free'd in
-     * send_cb. INIT_SEND_BUFFER_CAPACITY must be big enough for
-     * writing the base HTTP format */
-    struct send_buffer *new_send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
-    if ( !new_send_buf ) HANDLE_ALLOC_FAIL();
-
-    bool message_exists =
-        response->message != NULL || response->message_len != 0;
-    bool extra_headers_exist = response->headers_arr != NULL;
-
-    ev_ssize_t       ret;
-    http_status_code status_code = response->status_code;
-    size_t           eff_bufcap = new_send_buf->capacity, bytes_written = 0;
-    char            *eff_buf = new_send_buf->buffer;
-
-#define update_eff_buf(num_bytes)                                              \
-    do {                                                                       \
-        eff_buf += (size_t)num_bytes;                                          \
-        eff_bufcap -= (size_t)num_bytes;                                       \
-        bytes_written += (size_t)num_bytes;                                    \
-    } while ( 0 )
-
-#define do_realloc()                                                           \
-    do {                                                                       \
-        if ( handler_buf_realloc(                                              \
-                 &new_send_buf->buffer, &new_send_buf->capacity,               \
-                 MAX_SEND_BUFFER_SIZE,                                         \
-                 RECV_REALLOC_MUL * new_send_buf->capacity) == -2 )            \
-            return MAX_BUF_SIZE_EXCEEDED;                                      \
-        eff_buf = new_send_buf->buffer + bytes_written;                        \
-        eff_bufcap = new_send_buf->capacity - bytes_written;                   \
-    } while ( 0 )
-
-#define copy_headers(num_bytes, headers_arr, num_headers)                      \
-    do {                                                                       \
-        num_bytes = copy_headers_to_buf(headers_arr, num_headers, eff_buf,     \
-                                        eff_bufcap);                           \
-        if ( num_bytes == -1 ) {                                               \
-            do_realloc();                                                      \
-        } else if ( num_bytes < -1 )                                           \
-            LOG_ABORT("copy_headers_to_buf: unknown return value");            \
-    } while ( 0 )
-
-    ret = write_http_base_fmt(eff_buf, eff_bufcap, con_data->request->minor_ver,
-                              status_code, server_conf.SERVNAME);
-    if ( ret <= 0 ) return FAIL;
-
-    update_eff_buf(ret);
-
-    /* copy content_len to send buffer if exists: */
-    if ( message_exists ) {
-        /* +1 for null byte */
-        char               content_len[NUM_DIGITS(SIZE_T_MAX) + 1];
-        struct http_header content_len_header;
-        /* format response->message_len into string, store in content_len */
-        ret = num_to_str(content_len, ARR_SIZE(content_len),
-                         response->message_len);
-        if ( ret <= 0 ) return FAIL;
-        update_eff_buf(ret);
-
-        http_header_init(&content_len_header, "Content-Length", content_len);
-
-        do {
-            copy_headers(ret, &content_len_header, 1);
-        } while ( ret < 0 );
-
-        update_eff_buf(ret);
-    }
-
-    // copy headers to send buffer:
-    if ( extra_headers_exist ) {
-        do {
-            copy_headers(ret, response->headers_arr, response->num_headers);
-        } while ( ret < 0 );
-
-        update_eff_buf(ret);
-    }
-
-    /* copy final CRLF signifying end of headers: */
-    if ( eff_bufcap < CRLF_LEN ) do_realloc();
-
-    memcpy(eff_buf, CRLF, CRLF_LEN);
-    update_eff_buf(CRLF_LEN);
-
-    /* append HTTP message */
-    if ( message_exists ) {
-        while ( response->message_len > eff_bufcap )
-            do_realloc();
-
-        memcpy(new_send_buf->buffer + bytes_written, response->message,
-               response->message_len);
-
-        update_eff_buf(response->message_len);
-    }
-
-    new_send_buf->actual_len = bytes_written;
-
-    enqueue_send_buf(&con_data->send_queue, new_send_buf);
-
-    return SUCCESS;
 }
 
 /**
@@ -789,16 +641,21 @@ void http_respond_builtin_status(struct client_data *con_data,
         http_header_init(connection_header, "Connection", "keep-alive");
     }
 
-    /* http_respond formats everything into a single message and allocates
-     * memory for it. when http_respond returns, all memory allocated to
+    /* http_respond formats response into a single message stored in an
+     * initialized send_buf. when http_respond returns, all memory allocated to
      * @response can be free'd */
+    struct send_buffer *send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
 
-    switch ( http_respond(con_data, &response) ) {
-        case SUCCESS:
+    switch ( http_respond(send_buf, &response, server_conf.SERVNAME) ) {
+        case 0:
             break; // success
 
+        case 1:
+            LOG_ABORT("unimplemented code");
+            break;
+
         /* if response exceeds max send buffer size: */
-        case MAX_BUF_SIZE_EXCEEDED:
+        case 2:
             LOG_ERR("response with status code %d exceeds maximum buffer "
                     "size. aborting response.",
                     status_code);
@@ -808,6 +665,7 @@ void http_respond_builtin_status(struct client_data *con_data,
             LOG_ABORT("unknown return code from http_respond");
     }
 
+    enqueue_send_buf(&con_data->send_queue, send_buf);
     free(file_contents_buf);
 }
 

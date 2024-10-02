@@ -21,7 +21,7 @@ CC = clang
 # header file names with path relative to $(H_DIR)
 _HDEPS = headers.h server.h http_utils.h status_codes.h http_limits.h parser.h event_loop.h container_of.h list.h queue.h
 # C file names with path relative to $(SRC_DIR)
-_CDEPS = headers.c server.c http_utils.c status_codes.c http_limits.c parser.c event_loop.c
+_CDEPS = headers.c server.c http_utils.c status_codes.c http_limits.c parser.c event_loop.c response.c
 
 HDEPS = $(patsubst %.h,$(H_DIR)/%.h,$(_HDEPS))
 CDEPS = $(patsubst %.c,$(SRC_DIR)/%.c,$(_CDEPS))
@@ -34,7 +34,7 @@ main: all
 debug: OPT += -g -DDEBUG
 debug: all 
 
-all: LIBS $(OBJ)
+all: LIBS $(OBJ) http.h # http.h is a user-exposed header
 	$(CC) $(CFLAGS) $(LIB_LINK_FLAGS) -o $(EXECUTABLE_NAME) $(OBJ) $(MAIN_NAME)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HDEPS) | directories # include all header dependencies since C files each include multiple .h files

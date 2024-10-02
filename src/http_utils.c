@@ -16,9 +16,9 @@ int strftime_gmtformat(char *buf, size_t bufcap) {
      * format passed should always yield EXPECTED_FMT_LEN characters */
     if ( strftime(buf, bufcap, "%a, %d %b %Y %H:%M:%S GMT", tm_info) !=
          EXPECTED_FMT_LEN )
-        return EXIT_FAILURE;
+        return 1;
 
-    return EXIT_SUCCESS;
+    return 0;
 }
 
 ev_ssize_t copy_headers_to_buf(struct http_header *headers, size_t num_headers,

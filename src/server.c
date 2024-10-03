@@ -102,8 +102,8 @@ static inline void                enqueue_send_buf(struct queue       *queue,
                                                    struct send_buffer *send_buf);
 static inline struct send_buffer *peek_send_buf(struct queue *queue);
 static inline void                reset_http_req(http_req *request);
-static inline int init_client_event(struct event_loop *ev_loop, socket_t socket,
-                                    struct client_data *con_data);
+static inline int add_client_event(struct event_loop *ev_loop, socket_t socket,
+                                   struct client_data *con_data);
 struct send_buffer *init_send_buf(size_t capacity);
 void                destroy_send_buf(struct send_buffer *send_buf);
 static inline int   init_client_recv_buf(struct client_data *con_data);
@@ -283,7 +283,8 @@ int http_handle_incomplete_req(struct client_data *con_data) {
         single buffer */
         status = handler_buf_realloc(
             &con_data->recv_buf->buffer, &con_data->recv_buf->capacity,
-            MAX_RECV_BUFFER_SIZE, 2 * con_data->recv_buf->capacity);
+            MAX_RECV_BUFFER_SIZE,
+            RECV_REALLOC_MUL * con_data->recv_buf->capacity);
 
         // TODO out of memory err in handler_buf_realloc
         switch ( status ) {
@@ -317,6 +318,13 @@ static inline enum http_req_status parse_request(struct client_data *con_data) {
 
     if ( status != HTTP_OK ) return status;
 
+    /* path is initially allocated to be its max size URI_PATH_LEN_LIMIT, so
+     * return err if exceeds capacity */
+    if ( con_data->request->path_bufcap < req_path_len ) {
+        LOG_ERR("user path length exceeds limit");
+        return HTTP_URI_TOO_LONG;
+    }
+
     /* from here status == HTTP_OK */
 
     /* failsafe */
@@ -326,7 +334,7 @@ static inline enum http_req_status parse_request(struct client_data *con_data) {
     memcpy(con_data->request->path, req_path, req_path_len);
     con_data->request->path_len = req_path_len;
 
-    return status;
+    return HTTP_OK;
 }
 
 static inline enum http_req_status parse_content(struct client_data *con_data) {
@@ -682,7 +690,7 @@ static inline int init_client_request(struct client_data *con_data) {
     if ( !con_data->request->headers ) return EXIT_FAILURE;
     con_data->request->path = malloc(URI_PATH_LEN_LIMIT);
     if ( !con_data->request->path ) return EXIT_FAILURE;
-    con_data->request->path_buf_cap = URI_PATH_LEN_LIMIT;
+    con_data->request->path_bufcap = URI_PATH_LEN_LIMIT;
 
     return EXIT_SUCCESS;
 }
@@ -699,7 +707,7 @@ static inline int destroy_client_request(struct client_data *con_data) {
 
 struct send_buffer *init_send_buf(size_t capacity) {
 
-    struct send_buffer *send_buf = calloc(1, sizeof(*send_buf));
+    struct send_buffer *send_buf = calloc(1, sizeof(struct send_buffer));
 
     if ( !send_buf ) return NULL;
 
@@ -759,13 +767,13 @@ static inline int destroy_client_recv_buf(struct client_data *con_data) {
     return SUCCESS;
 }
 
-static inline int init_client_event(struct event_loop *ev_loop, socket_t socket,
-                                    struct client_data *con_data) {
+static inline int add_client_event(struct event_loop *ev_loop, socket_t socket,
+                                   struct client_data *con_data) {
     con_data->event = ev_add_conn(ev_loop, socket, con_data);
     return SUCCESS;
 }
 
-static inline int destroy_client_event(struct client_data *con_data) {
+static inline int remove_client_event(struct client_data *con_data) {
     ev_remove_conn(con_data->event);
     con_data->event = NULL;
     return SUCCESS;
@@ -776,9 +784,6 @@ struct client_data *add_client(struct event_loop *ev_loop, socket_t socket) {
     if ( !con_data ) HANDLE_ALLOC_FAIL();
     con_data->sockfd = socket;
 
-    if ( init_client_event(ev_loop, socket, con_data) == EXIT_FAILURE )
-        HANDLE_ALLOC_FAIL();
-
     if ( init_client_recv_buf(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
 
     if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
@@ -787,6 +792,9 @@ struct client_data *add_client(struct event_loop *ev_loop, socket_t socket) {
         LOG_ABORT("failed initializing client send queue");
 
     con_data->close_requested = false;
+
+    if ( add_client_event(ev_loop, socket, con_data) == EXIT_FAILURE )
+        HANDLE_ALLOC_FAIL();
 
     return con_data;
 }
@@ -801,7 +809,7 @@ static inline void destroy_client(struct client_data *con_data) {
     destroy_queue(&con_data->send_queue);
     destroy_client_request(con_data);
     destroy_client_recv_buf(con_data);
-    destroy_client_event(con_data);
+    remove_client_event(con_data);
 
     evutil_closesocket(con_data->sockfd);
 

@@ -31,7 +31,7 @@ typedef struct {
 typedef struct {
     /* an independent buffer holding the request path */
     char            *path;
-    size_t           path_len, path_buf_cap;
+    size_t           path_len, path_bufcap;
     enum http_method method;
     int              minor_ver;
     /* hashset of headers of HTTP req, each headers value is copied into a

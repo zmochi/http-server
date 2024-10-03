@@ -77,7 +77,7 @@ http_parse_request(char *buffer, size_t buf_len, enum http_method *method,
                                        .message = NULL,
                                        .minor_ver = *minor_version,
                                        .num_headers = internal_num_headers,
-                                       .path_buf_cap = *path_len,
+                                       .path_bufcap = *path_len,
                                        .message_length = 0};
 
     if ( !is_request_HTTP_compliant(&internal_request) ) return HTTP_BAD_REQ;

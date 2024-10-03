@@ -15,8 +15,8 @@
     printf("DEBUG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
 
 #define LOG_ERR_DEBUG(fmt, ...)                                                \
-    fprintf(stderr, "DEBUG: ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,     \
-            ##__VA_ARGS__)
+    (void)fprintf(stderr, "DEBUG: ERROR: %s: " fmt "\n",                       \
+                  BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
 #else
 
 #define LOG_DEBUG(fmt, ...)     ((void)0)
@@ -29,8 +29,8 @@
     printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
 
 #define LOG_ERR(fmt, ...)                                                      \
-    fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
-            ##__VA_ARGS__)
+    (void)fprintf(stderr, "ERROR: %s: line %d: " fmt "\n",                     \
+                  BOOST_CURRENT_FUNCTION, __LINE__, ##__VA_ARGS__)
 
 #define LOG_ABORT(fmt, ...)                                                    \
     do {                                                                       \

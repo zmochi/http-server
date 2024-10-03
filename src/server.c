@@ -361,6 +361,16 @@ static inline enum http_req_status parse_content(struct client_data *con_data) {
         &con_data->request->message_length);
 }
 
+static inline int http_respond(struct client_data *con_data,
+                               http_res           *response) {
+    struct send_buffer *send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
+
+    int ret = format_response(send_buf, response, server_conf.SERVNAME);
+
+    enqueue_send_buf(&con_data->send_queue, send_buf);
+
+    return ret;
+}
 void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     SUPPRESS_UNUSED(flags);
     struct client_data *con_data = (struct client_data *)arg;
@@ -480,9 +490,7 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
         return;
     }
 
-    struct send_buffer *send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
-
-    switch ( http_respond(send_buf, &response, server_conf.SERVNAME) ) {
+    switch ( http_respond(con_data, &response) ) {
         case SUCCESS:
             break; // success
 
@@ -650,11 +658,11 @@ void http_respond_builtin_status(struct client_data *con_data,
     }
 
     /* http_respond formats response into a single message stored in an
-     * initialized send_buf. when http_respond returns, all memory allocated to
+     * initialized send_buf and queues it to be sent. when http_respond returns,
+     * all memory allocated to
      * @response can be free'd */
-    struct send_buffer *send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
 
-    switch ( http_respond(send_buf, &response, server_conf.SERVNAME) ) {
+    switch ( http_respond(con_data, &response) ) {
         case 0:
             break; // success
 
@@ -673,7 +681,6 @@ void http_respond_builtin_status(struct client_data *con_data,
             LOG_ABORT("unknown return code from http_respond");
     }
 
-    enqueue_send_buf(&con_data->send_queue, send_buf);
     free(file_contents_buf);
 }
 

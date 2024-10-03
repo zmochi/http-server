@@ -30,7 +30,7 @@ struct send_buffer {
  * @param server_name name of server in formatted response
  * @return 0 on success, 1 on general failure and 2 if response is too large
  */
-int http_respond(struct send_buffer *send_buf, http_res *response,
-                 const char *server_name);
+int format_response(struct send_buffer *send_buf, http_res *response,
+                    const char *server_name);
 
 #endif /* __RESPONSE_H */

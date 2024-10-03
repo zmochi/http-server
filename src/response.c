@@ -69,8 +69,8 @@ static inline int realloc_send_buf(struct send_buffer *send_buf, char **eff_buf,
 }
 
 /**
- * @brief helper function for http_respond, copies specified headers into send
- * buffer
+ * @brief helper function for format_response, copies specified headers into
+ * send buffer
  *
  * @param headers_arr array of headers to format into send buffer
  * @param num_headers size of array
@@ -94,13 +94,15 @@ static inline int sendbuf_copy_headers(struct send_buffer *send_buf,
             LOG_ABORT("copy_headers_to_buf: unknown return value");
     } while ( num_bytes < 0 );
 
+    *eff_buf += num_bytes;
+    *eff_bufcap -= (size_t)num_bytes;
     send_buf->bytes_written += (size_t)num_bytes;
 
     return SUCCESS;
 }
 
 /**
- * @brief helper function for http_respond
+ * @brief helper function for format_response
  *
  * @param content_len value of Content-Length header to format into send buffer
  * @param any for other parameters see sendbuf_copy_message documentation
@@ -118,10 +120,6 @@ static inline int sendbuf_copy_content_len(struct send_buffer *send_buf,
         num_to_str(content_len_buf, ARR_SIZE(content_len_buf), content_len);
     if ( ret <= 0 ) return FAIL;
 
-    eff_buf += ret;
-    eff_bufcap -= ret;
-    send_buf->bytes_written += (size_t)ret;
-
     http_header_init(&content_len_header, "Content-Length", content_len_buf);
 
     return sendbuf_copy_headers(send_buf, &content_len_header, 1, eff_buf,
@@ -129,7 +127,7 @@ static inline int sendbuf_copy_content_len(struct send_buffer *send_buf,
 }
 
 /**
- * @brief helper function for http_respond, increases send_buf->bytes_written
+ * @brief helper function for format_response, increases send_buf->bytes_written
  * after writing
  *
  * @param send_buf send buffer to copy message into
@@ -150,7 +148,7 @@ static inline int sendbuf_copy_message(struct send_buffer *send_buf,
             return MAX_BUF_SIZE_EXCEEDED;
         }
 
-    memcpy(eff_buf, message, message_len);
+    memcpy(*eff_buf, message, message_len);
 
     *eff_buf += message_len;
     *eff_bufcap -= message_len;
@@ -173,8 +171,8 @@ static inline int sendbuf_copy_message(struct send_buffer *send_buf,
  * @param server_name name of server in formatted response
  * @return 0 on success, 1 on general failure and 2 if response is too large
  */
-int http_respond(struct send_buffer *send_buf, http_res *response,
-                 const char *server_name) {
+int format_response(struct send_buffer *send_buf, http_res *response,
+                    const char *server_name) {
 
     bool message_exists =
         response->message != NULL && response->message_len != 0;
@@ -184,6 +182,9 @@ int http_respond(struct send_buffer *send_buf, http_res *response,
     http_status_code status_code = response->status_code;
     size_t           eff_bufcap = send_buf->capacity;
     char            *eff_buf = send_buf->buffer;
+
+    if ( response->http_minor_ver >= 2 )
+        LOG_ABORT("Invalid http minor version in user response");
 
     ret = write_http_base_fmt(eff_buf, eff_bufcap, response->http_minor_ver,
                               status_code, server_name);
@@ -222,7 +223,7 @@ int http_respond(struct send_buffer *send_buf, http_res *response,
     memcpy(eff_buf, CRLF, CRLF_LEN);
 
     eff_buf += CRLF_LEN;
-    eff_bufcap += CRLF_LEN;
+    eff_bufcap -= CRLF_LEN;
     send_buf->bytes_written += CRLF_LEN;
 
     /* append HTTP message */

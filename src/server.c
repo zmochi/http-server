@@ -108,6 +108,7 @@ struct send_buffer *init_send_buf(size_t capacity);
 void                destroy_send_buf(struct send_buffer *send_buf);
 static inline int   init_client_recv_buf(struct client_data *con_data);
 static inline int   init_client_request(struct client_data *con_data);
+static inline int   destroy_client_request(struct client_data *con_data);
 
 bool is_conf_valid(config conf) {
     bool handler_exists;
@@ -120,7 +121,6 @@ bool is_conf_valid(config conf) {
 }
 
 int init_server(config conf) {
-
     server_conf = conf;
     if ( !is_conf_valid(conf) ) {
         LOG_ABORT("server configuration invalid");
@@ -213,19 +213,16 @@ void close_con_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
 
 void send_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     SUPPRESS_UNUSED(flags);
-    LOG_DEBUG("send_cb");
 
     struct client_data *con_data = (struct client_data *)arg;
-
-    // CHECK_CORRUPT_CALL(con_data, sockfd);
 
     bool is_send_queue_empty = is_empty(&con_data->send_queue);
 
     if ( is_send_queue_empty ) {
         /* nothing to send */
-        LOG_DEBUG("nothing to send");
         return;
     }
+    LOG_DEBUG("sending to client");
 
     /* send pending responses */
     struct send_buffer send_buf = *peek_send_buf(&con_data->send_queue);
@@ -371,6 +368,19 @@ static inline int http_respond(struct client_data *con_data,
 
     return ret;
 }
+
+static void processed_request(struct client_data *con_data) {
+    destroy_client_request(con_data);
+    init_client_request(con_data);
+
+    con_data->recv_buf->bytes_parsed = 0;
+    con_data->recv_buf->bytes_received = 0;
+    con_data->recv_buf->headers_parsed = false;
+    con_data->recv_buf->content_parsed = false;
+
+    con_data->close_requested = false;
+}
+
 void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     SUPPRESS_UNUSED(flags);
     struct client_data *con_data = (struct client_data *)arg;
@@ -516,7 +526,7 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     if ( response.headers_arr != NULL ) free(response.headers_arr);
     if ( response.message != NULL ) free(response.message);
 
-    reset_http_req(con_data->request);
+    processed_request(con_data);
 
     /* finished processing a single request. */
 }
@@ -609,6 +619,8 @@ void http_respond_builtin_status(struct client_data *con_data,
     if ( !msg_file ) {
         /* no html file for response content, so don't send any */
         content_len = 0;
+        response.headers_arr = NULL;
+        response.num_headers = 0;
     } else {
 
         while ( (ret = load_file_to_buf(msg_file, file_contents_buf,
@@ -633,29 +645,30 @@ void http_respond_builtin_status(struct client_data *con_data,
         } else if ( ret <= -2 ) {
             LOG_ABORT("error in load_file_to_buf");
         }
+
+        /* gets base 10 number of digits in a natural number */
+
+        struct http_header  headers[2];
+        struct http_header *connection_header = &headers[0],
+                           *content_type_header = &headers[1];
+
+        /* http_respond adds Content-Length header based on response.message_len
+         */
+        http_header_init(content_type_header, "Content-Type",
+                         "text/html; charset=utf-8");
+
+        if ( http_res_flags & SERV_CON_CLOSE ) {
+            http_header_init(connection_header, "Connection", "close");
+        } else {
+            http_header_init(connection_header, "Connection", "keep-alive");
+        }
+        response.headers_arr = headers;
+        response.num_headers = ARR_SIZE(headers);
     }
-
-    /* gets base 10 number of digits in a natural number */
-
-    struct http_header  headers[2];
-    struct http_header *connection_header = &headers[0],
-                       *content_type_header = &headers[1];
 
     response.status_code = status_code;
     response.message = file_contents_buf;
     response.message_len = content_len;
-    response.headers_arr = headers;
-    response.num_headers = ARR_SIZE(headers);
-
-    /* http_respond adds Content-Length header based on response.message_len */
-    http_header_init(content_type_header, "Content-Type",
-                     "text/html; charset=utf-8");
-
-    if ( http_res_flags & SERV_CON_CLOSE ) {
-        http_header_init(connection_header, "Connection", "close");
-    } else {
-        http_header_init(connection_header, "Connection", "keep-alive");
-    }
 
     /* http_respond formats response into a single message stored in an
      * initialized send_buf and queues it to be sent. when http_respond returns,

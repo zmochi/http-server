@@ -420,11 +420,12 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
 
     /* if HTTP headers were not parsed and put in con_data yet: */
     if ( !con_data->recv_buf.headers_parsed ) {
+        enum http_req_status req_status;
         /* parses everything preceding the content from request, populates
          * @con_data->request->headers with HTTP headers values copied from
          * request */
 
-        switch ( parse_request(con_data) ) {
+        switch ( (req_status = parse_request(con_data)) ) {
             case HTTP_BAD_REQ:
                 http_respond_builtin_status(con_data, Bad_Request, 0);
                 return;
@@ -442,6 +443,13 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
                 return;
 
             case HTTP_OK:
+                con_data->recv_buf.headers_parsed = true;
+
+                /* write start address of content (message) to the http request
+                 * struct
+                 */
+                con_data->request.message =
+                    con_data->recv_buf.buffer + *bytes_parsed;
                 break;
 
             default:
@@ -449,55 +457,55 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
                           "http_parse_request. "
                           "terminating server");
         }
-        // request line + headers are complete:
 
-        con_data->recv_buf->headers_parsed = true;
+        _VALIDATE_LOGIC(req_status == HTTP_OK,
+                        "Exited parsing request but status is not HTTP_OK");
     }
 
-    /* write start address of content (message) to the http request struct,
-     * if this is the second or more pass, rewrite incase recv_buf was
-     * re-allocated
-     */
-    con_data->request->message = con_data->recv_buf->buffer + *bytes_parsed;
+    if ( !con_data->recv_buf.content_parsed ) {
+        enum http_req_status req_status;
+        /* continue parsing HTTP message content (or begin parsing if this is
+         * the first pass). does not modify bytes_parsed unless completed
+         * parsing (and returns HTTP_OK) */
 
-    /* continue parsing HTTP message content (or begin parsing if this is
-     * the first pass). does not modify bytes_parsed unless completed
-     * parsing (and returns HTTP_OK) */
+        switch ( (req_status = parse_content(con_data)) ) {
+            case HTTP_INCOMPLETE_REQ:
+                http_handle_incomplete_req(con_data);
+                return; /* wait for more data to become available */
 
-    switch ( parse_content(con_data) ) {
-        case HTTP_INCOMPLETE_REQ:
-            http_handle_incomplete_req(con_data);
-            return; /* wait for more data to become available */
+            case HTTP_ENTITY_TOO_LARGE:
+                /* closes connection if entity too large, since there is no
+                 * space to process more additional requests */
+                http_respond_builtin_status(con_data, Content_Too_Large,
+                                            SERV_CON_CLOSE);
+                return;
 
-        case HTTP_ENTITY_TOO_LARGE:
-            /* closes connection if entity too large, since there is no
-             * space to process more additional requests */
-            http_respond_builtin_status(con_data, Content_Too_Large,
-                                        SERV_CON_CLOSE);
-            return;
+            case HTTP_BAD_REQ:
+                http_respond_builtin_status(con_data, Bad_Request, 0);
+                return;
 
-        case HTTP_BAD_REQ:
-            http_respond_builtin_status(con_data, Bad_Request, 0);
-            return;
-
-        case HTTP_OK:
-            /* con_data->request->message_length given correct value by
-             * parse_content() */
-            *bytes_parsed += con_data->request->message_length;
-            break;
-
-        default:
-            LOG_ABORT(
-                "recv_cb: unexpected return value from http_parse_content. "
-                "terminating server");
-    }
-
+            case HTTP_OK:
+                /* con_data->request->message_length given correct value by
+                 * parse_content() */
+                *bytes_parsed += con_data->request.message_length;
                 con_data->recv_buf.content_parsed = true;
+                break;
+
+            default:
+                LOG_ABORT(
+                    "recv_cb: unexpected return value from http_parse_content. "
+                    "terminating server");
+        }
+
+        _VALIDATE_LOGIC(req_status == HTTP_OK,
+                        "Exited parsing content but status is not HTTP_OK");
+    }
 
     http_res response = server_conf.handler(&con_data->request);
 
     if ( response.num_headers > MAX_NUM_HEADERS ) {
         LOG_ERR("handler returned response with too many headers, aborting.");
+        // TODO proper handling of this situation instead of just returning
         return;
     }
 

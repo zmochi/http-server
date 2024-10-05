@@ -32,12 +32,12 @@ struct recv_buffer {
 };
 
 struct client_data {
-    int                 sockfd;
-    struct conn_data   *event;
-    struct queue        send_queue;
-    struct recv_buffer *recv_buf;
-    http_req           *request;
-    bool                close_requested;
+    int                sockfd;
+    struct conn_data  *event;
+    struct queue       send_queue;
+    struct recv_buffer recv_buf;
+    http_req           request;
+    bool               close_requested;
 };
 
 #endif /* __MAIN_H */

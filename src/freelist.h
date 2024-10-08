@@ -6,6 +6,7 @@
 #ifndef __FREELIST_H
 #define __FREELIST_H
 
+#include <stdatomic.h>
 #include <stddef.h> /* for size_t */
 #include <stdint.h> /* for uint32_t */
 
@@ -15,8 +16,18 @@ typedef uint32_t
                the minimum size of elements in the freelist. if array length
                doesn't exceed 4GB this is a good trade-off */
 
+/* for the union trick to work, list_index must be 32 bits */
+static_assert(sizeof(list_index) == sizeof(uint32_t));
 struct freelist {
-    list_index array_len, head, top;
+    /* union to allow incrementing head and top together, atomically */
+    union {
+        _Atomic uint64_t head_top_union;
+        struct {
+            _Atomic list_index head;
+            _Atomic list_index top;
+        };
+    };
+    list_index array_len;
     size_t     elem_size;
     void      *array;
 };

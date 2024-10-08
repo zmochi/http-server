@@ -1,5 +1,6 @@
 #include "freelist.h"
 
+#include <_static_assert.h>
 #include <stdio.h>  /* printf */
 #include <string.h> /* for memcpy */
 
@@ -33,6 +34,11 @@ void *list_elem(struct freelist *list, list_index idx) {
     return (void *)((char *)list->array + (idx * list->elem_size));
 }
 
+void inc_head_top_atomic(struct freelist *list) {
+    constexpr uint64_t inc = (1ULL << 32) + 1ULL;
+    list->head_top_union += inc;
+}
+
 /**
  * @brief returns index of next available empty slot after @head in free list
  */
@@ -54,8 +60,7 @@ freelist_status freelist_insert(struct freelist *list, void *elem) {
          * space at @top */
         memcpy(list_elem(list, list->top), elem, list->elem_size);
 
-        list->top++;
-        list->head++;
+        inc_head_top_atomic(list);
     } else {
         /* list is not full, head points at empty slot which contains pointer to
          * next free slot

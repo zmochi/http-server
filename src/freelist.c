@@ -1,6 +1,6 @@
 #include "freelist.h"
 
-#include <_static_assert.h>
+#include <stdatomic.h>
 #include <stdio.h>  /* printf */
 #include <string.h> /* for memcpy */
 
@@ -14,7 +14,7 @@
 
 /* content of a free slot */
 struct freelist_data {
-    list_index next_index;
+    _Atomic list_index next_index;
 };
 
 freelist_status freelist_init(struct freelist *freelist, void *array,
@@ -34,46 +34,68 @@ void *list_elem(struct freelist *list, list_index idx) {
     return (void *)((char *)list->array + (idx * list->elem_size));
 }
 
-void inc_head_top_atomic(struct freelist *list) {
-    constexpr uint64_t inc = (1ULL << 32) + 1ULL;
-    list->head_top_union += inc;
-}
-
 /**
- * @brief returns index of next available empty slot after @head in free list
+ * @brief returns ptr to index of next available empty slot after @head in free
+ * list
  */
-list_index get_next_empty(struct freelist *list) {
-    return ((struct freelist_data *)list_elem(list, list->head))->next_index;
+_Atomic list_index *get_next_empty(struct freelist *list, list_index head_idx) {
+    return &((struct freelist_data *)list_elem(list, head_idx))->next_index;
 }
 
 freelist_status freelist_insert(struct freelist *list, void *elem) {
-    list_index head = list->head;
-    list_index top = list->top;
+    atomic_bool        is_list_initialized = false;
+    _Atomic list_index top = 0;
+    _Atomic list_index head = list->array_len;
+    _Atomic list_index nexthead = list->array_len;
 
-    if ( head == top ) {
-        if ( top >= list->array_len ) {
-            /* no space left */
-            return FREELIST_FULL;
+    top++; // fetch_and_inc, reserve slot
+    // reserve head - atomically head <- head.next and fetch headcopy
+    // if headcopy is out of bounds(alias for top==head), head.next was invalid
+    // (make sure always invalid in this scenario), use reserved slot if top is
+    // in bounds. otherwise (top is out of bounds) list is full. if headcopy is
+    // in bounds, use (reserved) headcopy. make sure head.next is invalid if
+    // this is the last valid head
+
+    // base idea:
+    // atomically reserve top in case list was not fully initialized.
+    // then, atomically reserve head (by atomically assigning head = head.next
+    // and fetching) now free to take my time interacting with head - if in
+    // bounds:
+
+    // new idea:
+    // base state: top = 0, head = arr_len (out of bounds)
+    // if list not initialized:
+    // atomic fetch and inc top
+    // if top is in bounds, spot is free.
+    // if top is out of bounds, list is initialized - set list initialized,
+    // atomically dec and use head. even if many threads enter this branch when
+    // the list is full, the out of bounds condition will always occur. if list
+    // is initialized: atomically fetch exchange head = head.next if fetched
+    // head is out of bounds, list is full if fetched head is in bounds, use
+    // head
+
+    if ( !is_list_initialized ) {
+        list_index oldtop = atomic_fetch_add(&top, 1);
+        if ( oldtop < list->array_len ) {
+            // copy elem
+            // reset oldtop = list->array_len
+            return FREELIST_SUCCESS;
         }
-
-        /* list hasn't been fully initialized, there's un-initialized empty
-         * space at @top */
-        memcpy(list_elem(list, list->top), elem, list->elem_size);
-
-        inc_head_top_atomic(list);
-    } else {
-        /* list is not full, head points at empty slot which contains pointer to
-         * next free slot
-         * if this is the last empty free slot then next_empty will be
-         * array_len, out of bounds */
-        list_index next_empty = get_next_empty(list);
-
-        /* failsafe for invalid index */
-        if ( !(next_empty < list->array_len) ) return FREELIST_ERR;
-
-        memcpy(list_elem(list, head), elem, list->elem_size);
-        list->head = next_empty;
+        atomic_store(&is_list_initialized, true);
     }
+
+    /* if list is full, next head is equal to array_len */
+    list_index oldhead;
+    do {
+        oldhead = atomic_load(&head);
+        nexthead = atomic_load(get_next_empty(list, oldhead));
+    } while ( !atomic_compare_exchange_strong(&head, &oldhead, nexthead) );
+
+    if ( oldhead >= list->array_len ) {
+        return FREELIST_FULL;
+    }
+
+    // copy elem to oldhead
 
     return FREELIST_SUCCESS;
 }

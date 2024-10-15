@@ -1,69 +1,89 @@
-/**
- * @file
- * @brief functions for managing a free list inside an array. The passed array
- */
 
 #ifndef __FREELIST_H
 #define __FREELIST_H
 
-#include <stdatomic.h>
-#include <stddef.h> /* for size_t */
-#include <stdint.h> /* for uint32_t */
+#include <stdalign.h>  /* for alignof() */
+#include <stdatomic.h> /* atomics */
+#include <stddef.h>    /* for size_t */
+#include <stdint.h>    /* for uint32_t */
 
 typedef uint32_t
-    list_index; /* this data is inserted in empty places in the array,
+    fl_index; /* this data is inserted in empty places in the array,
                so it must be as small as possible. sizeof(list_index) determines
-               the minimum size of elements in the freelist. if array length
+               the minimum size of elements in the fl. if array length
                doesn't exceed 4GB this is a good trade-off */
 
-/* for the union trick to work, list_index must be 32 bits */
-static_assert(sizeof(list_index) == sizeof(uint32_t));
 struct freelist {
-    /* union to allow incrementing head and top together, atomically */
-    union {
-        _Atomic uint64_t head_top_union;
-        struct {
-            _Atomic list_index head;
-            _Atomic list_index top;
-        };
-    };
-    list_index array_len;
-    size_t     elem_size;
-    void      *array;
+    atomic_bool      is_list_initialized;
+    _Atomic fl_index head;
+    _Atomic fl_index top;
+    fl_index         array_len;
+    size_t           elem_size;
+    void            *array;
 };
 
 typedef enum {
-    FREELIST_ARR_ELEM_TOO_SMALL, /* may only be returned from freelist_init() */
-    FREELIST_FULL, /* may only be returned from freelist_insert() */
-    FREELIST_ERR,
-    FREELIST_SUCCESS,
-} freelist_status;
+    FL_FULL,
+    FL_ERR,
+    FL_SUCCESS,
+} fl_status;
 
-freelist_status freelist_init(struct freelist *freelist, void *array,
-                              list_index array_len, size_t elem_size);
+fl_status do_freelist_init(struct freelist *freelist, void *array,
+                           fl_index array_len, size_t elem_size);
+
+/* stringify macros to for __LINE__ in fl_debug_info */
+#define FL_DO_STRINGIFY(a) #a
+#define FL_STRINGIFY(a)    FL_DO_STRINGIFY(a)
+
+#define fl_debug_info "file " __FILE__ ", line " FL_STRINGIFY(__LINE__) ": "
+
+/* defined in freelist.c */
+extern const size_t fl_alignment;
+
+/* convenience macro for initializing array of statically known type, making
+ * sure size is correct and alignment is correct */
+#define freelist_init(struct_fl_ptr, array, array_len)                         \
+    do {                                                                       \
+        static_assert(alignof(typeof((array)[0])) >= fl_alignment,             \
+                      fl_debug_info                                            \
+                      "bad alignment of user-supplied fl array");              \
+        static_assert(sizeof((array)[0]) >= sizeof(struct freelist_data),      \
+                      fl_debug_info "size of array element too smaller");      \
+        do_freelist_init(struct_fl_ptr, (void *)(array), array_len,            \
+                         sizeof((array)[0]));                                  \
+    } while ( 0 )
+
+/**
+ * @brief allocates a freelist (array) slot.
+ *
+ * @param list list to allocate from
+ * @return pointer to allocated slot of size list->elem_size
+ */
+void *freelist_alloc(struct freelist *list);
 
 /**
  * @brief inserts element into freelist
  *
  * @param list list to insert into
- * @param elem pointer to element to insert
- * @return FREELIST_FULL if list is full, FREELIST_ERR on error and
- * FREELIST_SUCCESS on success
+ * @param elem pointer to element to insert, copies element into list
+ * @return pointer to copy of elem inside the list, of size list->elem_size
  */
-freelist_status freelist_insert(struct freelist *list, void *elem);
+void *freelist_insert(struct freelist *list, void *elem);
 
 /**
- * @brief removes element at specified index from the freelist
+ * @brief removes element at specified index from the fl
  * it is the callers responsibility to ensure the array has an item in that
  * index. calling freelist_rm() on a free slot will probably break the list.
  *
  * @param list pointer to list to remove from
- * @param idx index of item to remove
+ * @param elem pointer to element in the list to remove
+ * @return FL_SUCCESS on success, FL_ERR if elem has a bad address
  */
-void freelist_rm(struct freelist *list, list_index idx);
+fl_status freelist_rm(struct freelist *list, void *elem);
 
 /**
  * @brief returns ptr to element with index @idx in @list
  */
-void *list_elem(struct freelist *list, list_index idx);
+void *list_elem(struct freelist *list, fl_index idx);
+
 #endif /* __FREELIST_H */

@@ -12,14 +12,23 @@ typedef uint32_t
                so it must be as small as possible. sizeof(list_index) determines
                the minimum size of elements in the fl. if array length
                doesn't exceed 4GB this is a good trade-off */
+struct union_head_tag {
+    union {
+        _Atomic uint64_t union_head_tag;
+        struct {
+            _Atomic fl_index head;
+            _Atomic fl_index tag;
+        };
+    };
+};
 
 struct freelist {
-    atomic_bool      is_list_initialized;
-    _Atomic fl_index head;
-    _Atomic fl_index top;
-    fl_index         array_len;
-    size_t           elem_size;
-    void            *array;
+    atomic_bool           is_list_initialized;
+    struct union_head_tag union_head_tag;
+    _Atomic fl_index      top;
+    fl_index              array_len;
+    size_t                elem_size;
+    void                 *array;
 };
 
 typedef enum {
@@ -31,7 +40,7 @@ typedef enum {
 fl_status do_freelist_init(struct freelist *freelist, void *array,
                            fl_index array_len, size_t elem_size);
 
-/* stringify macros to for __LINE__ in fl_debug_info */
+/* stringify macros for __LINE__ in fl_debug_info */
 #define FL_DO_STRINGIFY(a) #a
 #define FL_STRINGIFY(a)    FL_DO_STRINGIFY(a)
 

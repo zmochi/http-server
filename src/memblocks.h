@@ -10,6 +10,7 @@
 
 typedef enum {
     MEM_SUCCESS,
+    MEM_FAIL,
     NOMEM,
     MAX_SIZE_EXCEEDED,
 } mem_status_t;

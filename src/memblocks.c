@@ -53,9 +53,9 @@ static void init_block_data(struct block_data *memblock, blk_size_t size) {
 }
 
 struct memchunk {
-    mem           *startaddr;
+    mem *const     startaddr;
     _Atomic(mem *) top;
-    size_t         total_size;
+    const size_t   total_size;
     /* linked list entry to chain chunks together */
     struct list_item entry;
     /* this causes the chunk itself, which appears immediately after this struct
@@ -65,9 +65,14 @@ struct memchunk {
 
 static void init_memchunk(struct memchunk *chunk, mem *startaddr,
                           size_t total_size) {
-    chunk->startaddr = startaddr;
+    /* trick to initialize const members */
+    mem **startaddr_ptr = (mem **)&chunk->startaddr;
+    *startaddr_ptr = startaddr;
+
+    size_t *total_size_ptr = (size_t *)&chunk->total_size;
+    *total_size_ptr = total_size;
+
     chunk->top = chunk->startaddr;
-    chunk->total_size = total_size;
 
     init_entry(&chunk->entry);
 }
@@ -87,7 +92,8 @@ static bool is_chunk_full(struct memchunk *chunk, blk_size_t size) {
 }
 
 /**
- * @brief allocates a new chunk of size @size using a direct call to malloc()
+ * @brief allocates a new chunk of size @size using a direct call to malloc().
+ * must be called under lock.
  *
  * @param oldchunk old chunk to chain to this chunk, or NULL if this is the
  * first chunk
@@ -99,13 +105,16 @@ static struct memchunk *_Nullable new_memchunk(struct memchunk *oldchunk,
                                                size_t           size) {
     /* the memchunk metadata sits right before the actual chunk. this
      * implementation detail should be hidden.
-     * struct memchunk end is aligned to max alignment (in def), so the data
-     * segment is aligned */
-    struct memchunk *new_chunk = malloc(sizeof(*new_chunk) + size);
+     * added sizeof(struct block_data) so user can allocate a maximum of `size`
+     * instead of a maximum of `size - sizeof(struct block_data)` struct
+     * memchunk end is aligned to max alignment (in def), so the data segment is
+     * aligned */
+    size_t           real_size = sizeof(struct block_data) + size;
+    struct memchunk *new_chunk = malloc(sizeof(*new_chunk) + real_size);
 
     if ( new_chunk == nullptr ) return nullptr;
 
-    init_memchunk(new_chunk, (mem *)new_chunk + sizeof(*new_chunk), size);
+    init_memchunk(new_chunk, (mem *)new_chunk + sizeof(*new_chunk), real_size);
 
     /* logic check */
     assert(new_chunk->startaddr - (mem *)new_chunk == sizeof(struct memchunk));
@@ -149,22 +158,36 @@ static void init_bucket_node(struct bucket_node *node) {
     init_entry(&node->entry);
 }
 
-static void
-remove_bucket_node([[maybe_unused]] struct memblock_allocator *module,
-                   struct bucket_node                         *node) {
-    /* must be called under lock for node, no concurrent access is allowed */
+static void remove_last_bucket_node(
+    [[maybe_unused]] struct memblock_allocator *_Nonnull module,
+    struct bucket_node **_Nonnull bucket) {
+    /* must be called under lock for bucket, no concurrent access is allowed */
+    struct bucket_node *node = *bucket;
+    /* can't remove node when bucket is empty */
+    assert(*bucket != nullptr);
+
     assert(node->top_block == 0);
+    *bucket = list_entry(&node->entry, typeof(*node), entry);
+
+    /* special case for last node */
+    if ( *bucket == node ) {
+        *bucket = nullptr;
+    }
+
     list_rm(&node->entry);
 }
 
-static void add_bucket_node([[maybe_unused]] struct memblock_allocator *module,
-                            struct bucket_node **_Nonnull bucket,
-                            struct bucket_node *node) {
-    /* must be called under lock for node, no concurrent access is allowed */
-    if ( *bucket == nullptr )
-        *bucket = node;
-    else
-        list_add_tail(&node->entry, &((*bucket)->entry));
+static void
+add_bucket_node([[maybe_unused]] struct memblock_allocator *_Nonnull module,
+                struct bucket_node **_Nonnull bucket,
+                struct bucket_node *_Nonnull node) {
+    /* must be called under lock for bucket, no concurrent access is allowed */
+
+    /* add node so it precedes current node, when removing a node the current
+     * node will be placed next */
+    if ( *bucket != nullptr ) list_add_tail(&node->entry, &((*bucket)->entry));
+
+    *bucket = node;
 }
 
 /**
@@ -177,8 +200,7 @@ static void add_bucket_node([[maybe_unused]] struct memblock_allocator *module,
  * @return pointer to the new node, or nullptr if malloc() fails
  */
 static struct bucket_node *_Nullable new_bucket_node(
-    struct memblock_allocator *_Nonnull module,
-    struct bucket_node **_Nonnull bucket) {
+    struct memblock_allocator *_Nonnull module) {
     struct bucket_node *new_node;
     struct block_data  *new_node_block;
 
@@ -205,7 +227,6 @@ static struct bucket_node *_Nullable new_bucket_node(
     }
 
     new_node = (struct bucket_node *)get_memblock_startaddr(new_node_block);
-    printf("initializing new node at addr %p\n", new_node);
     init_bucket_node(new_node);
 
     return new_node;
@@ -215,16 +236,7 @@ static struct bucket_node *_Nullable get_last_bucket_node(
     struct memblock_allocator *_Nonnull module, blk_size_t size) {
 
     struct bucket_node **bucket = get_module_bucket(module, size);
-    struct bucket_node  *last_bucket_node;
-
-    if ( *bucket == nullptr ) {
-        last_bucket_node = nullptr;
-    } else {
-        last_bucket_node =
-            list_entry((*bucket)->entry.prev, typeof(*last_bucket_node), entry);
-    }
-
-    return last_bucket_node;
+    return *bucket;
 }
 
 /* represents a set of buckets, one bucket for each allowed, allocate-able size
@@ -253,7 +265,7 @@ struct memblock_allocator {
     /* array of memblock lists, each list contains memory blocks of some size
      * that can be re-used */
     struct mempool_buckets buckets;
-    size_t                 chunk_size;
+    const size_t           chunk_size;
     pthread_mutex_t        bucket_lock;
     pthread_mutex_t        memchunk_lock;
 };
@@ -311,7 +323,7 @@ static blk_size_t block_index(blk_size_t size) {
      * is likely to be the same whether precision is lost or not.
      * - size is very unlikely to be so large the cast makes a difference.
      */
-    unsigned int next_exp = (unsigned int)log2((double)size);
+    unsigned int next_exp = (unsigned int)(ceil(log2((double)size)));
 
     if ( next_exp > MEMBLOCKS_MAX_EXP ) {
         // TODO illegal size
@@ -368,8 +380,8 @@ static void bucket_store(struct memblock_allocator *_Nonnull module,
     if ( last_bucket_node == nullptr ||
          last_bucket_node->top_block >= BUCKET_NODE_SIZE ) {
         /* new_bucket_node is expensive, calls new_block() but is
-         * called infrequently (frequency of 1/BUCKET_NODE_SIZE) */
-        last_bucket_node = new_bucket_node(module, bucket);
+         * called infrequently (frequency of 1/BUCKET_NODE_SIZE worst case) */
+        last_bucket_node = new_bucket_node(module);
         if ( last_bucket_node == nullptr ) {
             // out of memory
             printf("out of memory\n");
@@ -383,16 +395,15 @@ static void bucket_store(struct memblock_allocator *_Nonnull module,
 
     /* add block to last bucket */
     last_bucket_node->blocks[(*node_top)++] = block;
-    printf("%p: incremented bucket %zu to %d\n", pthread_self(),
-           round_to_block(block->size), *node_top);
 
     pthread_mutex_unlock(&module->bucket_lock);
 }
 
 static struct block_data *_Nullable bucket_retrieve(
     struct memblock_allocator *_Nonnull module, blk_size_t size) {
-    struct bucket_node *last_bucket_node;
-    struct block_data  *block;
+    struct bucket_node **bucket = get_module_bucket(module, size);
+    struct bucket_node  *last_bucket_node;
+    struct block_data   *block;
 
     pthread_mutex_lock(&module->bucket_lock);
 
@@ -403,11 +414,9 @@ static struct block_data *_Nullable bucket_retrieve(
         block = nullptr;
     } else {
         block = last_bucket_node->blocks[--last_bucket_node->top_block];
-        printf("%p: decremented bucket %zu to %d\n", pthread_self(),
-               round_to_block(size), last_bucket_node->top_block);
 
         if ( last_bucket_node->top_block == 0 ) {
-            remove_bucket_node(module, last_bucket_node);
+            remove_last_bucket_node(module, bucket);
             assert(last_bucket_node->top_block >= 0 &&
                    last_bucket_node->top_block < BUCKET_NODE_SIZE);
             /* return block for re-use */
@@ -541,12 +550,13 @@ static struct memchunk *_Nullable ondemand_newchunk(
 [[nodiscard]] static mem_status_t
 new_block(struct memblock_allocator *_Nonnull module,
           struct block_data **_Nonnull metadata, blk_size_t size) {
+    // TODO: decide what to do when user allocates size == 0
     assert(size > 0);
     struct block_data *block_metadata;
     struct memchunk   *chunk =
         atomic_load_explicit(&module->cur_chunk, memory_order_relaxed);
 
-    /* round size to closest allowed size */
+    /* round size up to closest allowed size */
     const blk_size_t block_size = round_to_block(size);
     const blk_size_t total_size = sizeof(*block_metadata) + block_size;
 

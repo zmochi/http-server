@@ -8,6 +8,12 @@
 
 #include <stddef.h> /* for size_t */
 
+typedef enum {
+    MEM_SUCCESS,
+    NOMEM,
+    MAX_SIZE_EXCEEDED,
+} mem_status_t;
+
 /* opaque struct, can only be referenced through pointer */
 struct memblock_allocator;
 

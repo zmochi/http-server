@@ -5,6 +5,8 @@
 #ifndef __QUEUE_H
 #define __QUEUE_H
 
+#define SUPPRESS_UNUSED(arg) ((void)(arg))
+
 struct queue {
     struct list_item *head;
 };
@@ -17,12 +19,12 @@ struct queue {
  * @return 0 on success, -1 on failure
  */
 static inline int init_queue(struct queue *queue) {
-    (void)queue;
+    SUPPRESS_UNUSED(queue);
     return 0;
 }
 
 static inline int destroy_queue(struct queue *queue) {
-    (void)queue;
+    SUPPRESS_UNUSED(queue);
     return 0;
 }
 

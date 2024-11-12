@@ -5,13 +5,8 @@
 #include <src/http_limits.h>
 #include <src/http_utils.h>
 #include <src/queue.h>
+#include <src/send_queue.h>
 #include <src/status_codes.h>
-
-struct send_buffer {
-    char            *buffer;
-    size_t           bytes_sent, bytes_written, capacity;
-    struct list_item entry;
-};
 
 #define CRLF     "\r\n"
 #define CRLF_LEN (2)
@@ -25,12 +20,12 @@ struct send_buffer {
  * if either response->message is NULL or response->message_len is 0, no content
  * is sent with request
  *
- * @param send_buf struct send_buffer to format response into
+ * @param send_buf buffer to format response into
  * @param response response to format
  * @param server_name name of server in formatted response
  * @return 0 on success, 1 on general failure and 2 if response is too large
  */
-int format_response(struct send_buffer *send_buf, http_res *response,
+int format_response(struct buffer *send_buf, http_res *response,
                     const char *server_name);
 
 #endif /* __RESPONSE_H */

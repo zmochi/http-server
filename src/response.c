@@ -1,5 +1,6 @@
 #include <src/http_limits.h>
 #include <src/http_utils.h>
+#include <src/mempool.h>
 #include <src/queue.h>
 #include <src/response.h>
 #include <src/status_codes.h>
@@ -35,7 +36,9 @@ ev_ssize_t write_http_base_fmt(char *buffer, size_t bufcap, int minor_ver,
     if ( ret < 0 ) {
         LOG_ERR("snprintf: base_fmt: %s", strerror(errno));
         return -1;
-    } else if ( (size_t)ret >= bufcap ) { /* >= instead of > since ret does not
+    }
+
+    if ( (size_t)ret >= bufcap ) { /* >= instead of > since ret does not
                                              include terminating null byte */
         LOG_ERR("Initial capacity of send buffer is not big enough for the "
                 "base HTTP response format");
@@ -52,7 +55,7 @@ ev_ssize_t write_http_base_fmt(char *buffer, size_t bufcap, int minor_ver,
  * @param any for parameters see sendbuf_copy_message documentation
  * @return see sendbuf_copy_message documentation
  */
-static inline int realloc_send_buf(struct send_buffer *send_buf, char **eff_buf,
+static inline int realloc_send_buf(struct buffer *send_buf, char **eff_buf,
                                    size_t *eff_bufcap) {
     size_t bytes_written = send_buf->capacity - *eff_bufcap;
 
@@ -77,7 +80,7 @@ static inline int realloc_send_buf(struct send_buffer *send_buf, char **eff_buf,
  * @param any for other parameters see sendbuf_copy_message documentation
  * @return see sendbuf_copy_message documentation
  */
-static inline int sendbuf_copy_headers(struct send_buffer *send_buf,
+static inline int sendbuf_copy_headers(struct buffer      *send_buf,
                                        struct http_header *headers_arr,
                                        size_t num_headers, char **eff_buf,
                                        size_t *eff_bufcap) {
@@ -96,7 +99,7 @@ static inline int sendbuf_copy_headers(struct send_buffer *send_buf,
 
     *eff_buf += num_bytes;
     *eff_bufcap -= (size_t)num_bytes;
-    send_buf->bytes_written += (size_t)num_bytes;
+    send_buf->buflen += (size_t)num_bytes;
 
     return SUCCESS;
 }
@@ -108,7 +111,7 @@ static inline int sendbuf_copy_headers(struct send_buffer *send_buf,
  * @param any for other parameters see sendbuf_copy_message documentation
  * @return see sendbuf_copy_message documentation
  */
-static inline int sendbuf_copy_content_len(struct send_buffer *send_buf,
+static inline int sendbuf_copy_content_len(struct buffer *send_buf,
                                            size_t content_len, char **eff_buf,
                                            size_t *eff_bufcap) {
 
@@ -139,7 +142,7 @@ static inline int sendbuf_copy_content_len(struct send_buffer *send_buf,
  * @return MAX_BUF_SIZE_EXCEEDED if maximum buffer size is exceeded, otherwise
  * SUCCESS
  */
-static inline int sendbuf_copy_message(struct send_buffer *send_buf,
+static inline int sendbuf_copy_message(struct buffer *send_buf,
                                        const char *message, size_t message_len,
                                        char **eff_buf, size_t *eff_bufcap) {
     while ( message_len > *eff_bufcap )
@@ -152,7 +155,7 @@ static inline int sendbuf_copy_message(struct send_buffer *send_buf,
 
     *eff_buf += message_len;
     *eff_bufcap -= message_len;
-    send_buf->bytes_written += message_len;
+    send_buf->buflen += message_len;
 
     return SUCCESS;
 }
@@ -171,7 +174,7 @@ static inline int sendbuf_copy_message(struct send_buffer *send_buf,
  * @param server_name name of server in formatted response
  * @return 0 on success, 1 on general failure and 2 if response is too large
  */
-int format_response(struct send_buffer *send_buf, http_res *response,
+int format_response(struct buffer *send_buf, http_res *response,
                     const char *server_name) {
 
     bool message_exists =
@@ -182,6 +185,7 @@ int format_response(struct send_buffer *send_buf, http_res *response,
     http_status_code status_code = response->status_code;
     size_t           eff_bufcap = send_buf->capacity;
     char            *eff_buf = send_buf->buffer;
+    send_buf->buflen = 0;
 
     if ( response->http_minor_ver >= 2 )
         LOG_ABORT("Invalid http minor version in user response");
@@ -192,7 +196,7 @@ int format_response(struct send_buffer *send_buf, http_res *response,
 
     eff_buf += (size_t)ret;
     eff_bufcap -= (size_t)ret;
-    send_buf->bytes_written += (size_t)ret;
+    send_buf->buflen += (size_t)ret;
 
     /* copy content_len to send buffer if exists: */
     if ( message_exists &&
@@ -224,7 +228,7 @@ int format_response(struct send_buffer *send_buf, http_res *response,
 
     eff_buf += CRLF_LEN;
     eff_bufcap -= CRLF_LEN;
-    send_buf->bytes_written += CRLF_LEN;
+    send_buf->buflen += CRLF_LEN;
 
     /* append HTTP message */
     if ( message_exists &&

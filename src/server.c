@@ -5,8 +5,8 @@
 #include <src/http_utils.h>
 #include <src/mempool.h>
 #include <src/parser.h>
-#include <src/queue.h>
 #include <src/response.h>
+#include <src/send_queue.h>
 #include <src/server.h>
 #include <src/status_codes.h>
 
@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* initialized in init_server() */
 static config server_conf;
 
 #define DFLT_TIMEOUT {.tv_sec = 5, .tv_usec = 0}
@@ -91,25 +92,20 @@ void http_respond_builtin_status(struct client_data *con_data,
 static inline enum http_req_status parse_request(struct client_data *con_data);
 static inline enum http_req_status parse_content(struct client_data *con_data);
 
-static void reset_http_req(http_req *request);
 int terminate_connection(struct client_data *con_data, enum ev_flags flags);
 struct client_data *add_client(struct event_loop *ev_loop, socket_t socket);
 static inline void  destroy_client(struct client_data *con_data);
 
 bool finished_sending(struct client_data *con_data);
 
-static inline struct send_buffer *dequeue_send_buf(struct queue *queue);
-static inline void                enqueue_send_buf(struct queue       *queue,
-                                                   struct send_buffer *send_buf);
-static inline struct send_buffer *peek_send_buf(struct queue *queue);
-static inline void                reset_http_req(http_req *request);
 static inline int add_client_event(struct event_loop *ev_loop, socket_t socket,
                                    struct client_data *con_data);
-struct send_buffer *init_send_buf(size_t capacity);
-void                destroy_send_buf(struct send_buffer *send_buf);
-static inline int   init_client_recv_buf(struct client_data *con_data);
-static inline int   init_client_request(struct client_data *con_data);
-static inline int   destroy_client_request(struct client_data *con_data);
+static inline int init_client_recv_buf(struct buffer  *recv_buf,
+                                       struct mempool *pool);
+static inline int init_client_request(struct http_request *request,
+                                      struct mempool      *pool);
+static inline int destroy_client_request(struct http_request *request);
+static inline int clear_client_request(struct http_request *request);
 
 bool is_conf_valid(config conf) {
     bool handler_exists;
@@ -149,6 +145,7 @@ int init_server(config conf) {
 
 void accept_cb(socket_t sockfd, enum ev_flags flags, void *ev_loop) {
     SUPPRESS_UNUSED(flags);
+    LOG_DEBUG("accept, sockfd %d", sockfd);
     // sockaddr big enough for either IPv4 or IPv6
     // contains info about connection
     struct sockaddr_storage *sockaddr =
@@ -173,7 +170,7 @@ void accept_cb(socket_t sockfd, enum ev_flags flags, void *ev_loop) {
 
 void close_con_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     SUPPRESS_UNUSED(sockfd);
-    LOG_DEBUG();
+    LOG_DEBUG("close_con, sockfd %d", sockfd);
     struct client_data *con_data = (struct client_data *)arg;
     struct queue       *send_queue = &con_data->send_queue;
 
@@ -209,10 +206,10 @@ void close_con_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
         ;
 
     destroy_client(con_data);
-    printf("\n");
 }
 
 void send_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
+    LOG_DEBUG("send, sockfd %d", sockfd);
     SUPPRESS_UNUSED(flags);
 
     struct client_data *con_data = (struct client_data *)arg;
@@ -223,27 +220,26 @@ void send_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
         /* nothing to send */
         return;
     }
-    LOG_DEBUG("sending to client");
 
     /* send pending responses */
     struct send_buffer send_buf = *peek_send_buf(&con_data->send_queue);
     ev_ssize_t         nbytes = 0;
 
-    nbytes = send(sockfd, send_buf.buffer + send_buf.bytes_sent,
-                  send_buf.bytes_written - send_buf.bytes_sent, 0);
+    nbytes = send(sockfd, send_buf.buffer.buffer + send_buf.bytes_sent,
+                  send_buf.buffer.buflen - send_buf.bytes_sent, 0);
 
     if ( nbytes == SOCKET_ERROR || nbytes < 0 ) { // TODO: better error handling
         LOG_ABORT("send: %s\n",
                   evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
     } else if ( (size_t)nbytes ==
-                send_buf.bytes_written - send_buf.bytes_sent ) {
+                send_buf.buffer.buflen - send_buf.bytes_sent ) {
         /* all data sent, get next send buffer in the queue.
          * if there are no more buffers and connection should be closed,
          * wake close event */
         if ( finished_sending(con_data) && con_data->close_requested )
             terminate_connection(con_data, SERV_CON_CLOSE);
     } else if ( (size_t)nbytes <
-                send_buf.bytes_written - send_buf.bytes_sent ) {
+                send_buf.buffer.buflen - send_buf.bytes_sent ) {
         // not everything was sent
         peek_send_buf(&con_data->send_queue)->bytes_sent += (size_t)nbytes;
     } else {
@@ -258,9 +254,8 @@ bool finished_sending(struct client_data *con_data) {
 
     struct send_buffer *send_buf = dequeue_send_buf(&con_data->send_queue);
 
-    if ( send_buf->buffer == NULL )
-        LOG_ABORT(
-            "finished_sending: critical error, no send_buf buffer found\n");
+    if ( send_buf == NULL )
+        LOG_ABORT("finished_sending: critical error, no send_buf found\n");
 
     destroy_send_buf(send_buf);
 
@@ -275,7 +270,7 @@ int http_handle_incomplete_req(struct client_data *con_data) {
     int status;
     /* if request is incomplete because we reached buffer capacity,
     realloc: */
-    if ( con_data->recv_buf.bytes_received >= con_data->recv_buf.capacity ) {
+    if ( con_data->bytes_received >= con_data->recv_buf.capacity ) {
         /* TODO: change handler_buf_realloc signature to be extensible
         for performance improvements, pass in con_data instead of
         single buffer */
@@ -308,17 +303,19 @@ static inline enum http_req_status parse_request(struct client_data *con_data) {
     const char *req_path;
     size_t      req_path_len;
 
-    enum http_req_status status = http_parse_request(
-        con_data->recv_buf.buffer, con_data->recv_buf.bytes_received,
-        &con_data->request.method, &req_path, &req_path_len,
-        &con_data->request.minor_ver, con_data->request.headers,
-        &con_data->recv_buf.bytes_parsed);
+    struct http_request request = con_data->request;
+
+    enum http_req_status status =
+        http_parse_request(con_data->recv_buf.buffer, con_data->bytes_received,
+                           &con_data->request.method, &req_path, &req_path_len,
+                           &con_data->request.minor_ver,
+                           con_data->request.headers, &con_data->bytes_parsed);
 
     if ( status != HTTP_OK ) return status;
 
     /* path is initially allocated to be its max size URI_PATH_LEN_LIMIT, so
      * return err if exceeds capacity */
-    if ( con_data->request.path_bufcap < req_path_len ) {
+    if ( request.path.capacity < req_path_len ) {
         LOG_ERR("user path length exceeds limit");
         return HTTP_URI_TOO_LONG;
     }
@@ -326,44 +323,47 @@ static inline enum http_req_status parse_request(struct client_data *con_data) {
     /* from here status == HTTP_OK */
 
     /* failsafe */
-    if ( !con_data->request.path )
+    if ( !request.path.buffer )
         LOG_ABORT("path buffer not allocated for connection request struct");
 
-    memcpy(con_data->request.path, req_path, req_path_len);
-    con_data->request.path_len = req_path_len;
+    memcpy(con_data->request.path.buffer, req_path, req_path_len);
+    request.path.buflen = req_path_len;
 
     return HTTP_OK;
 }
 
 static inline enum http_req_status parse_content(struct client_data *con_data) {
+    struct http_request *request = &con_data->request;
     struct header_value *content_len_header = http_get_header(
-        con_data->request.headers, "Content-Length", strlen("Content-Length"));
+        request->headers, "Content-Length", strlen("Content-Length"));
     if ( content_len_header == NULL )
         /* no Content-Length header, rest of data received can be considered
          * to be a new request */
         return HTTP_OK;
 
     ev_ssize_t bytes_received_excluding_content =
-        con_data->request.message - con_data->recv_buf.buffer;
+        request->message.buffer - con_data->recv_buf.buffer;
 
     if ( bytes_received_excluding_content < 0 ) {
         LOG_ABORT("critical: request message points before buffer");
     }
-    size_t size_content_received = con_data->recv_buf.bytes_received -
-                                   (size_t)bytes_received_excluding_content;
+    size_t size_content_received =
+        con_data->bytes_received - (size_t)bytes_received_excluding_content;
 
-    return http_parse_content(
-        con_data->request.message, size_content_received,
-        content_len_header->value, content_len_header->value_len,
-        MAX_RECV_BUFFER_SIZE - con_data->recv_buf.bytes_received,
-        &con_data->request.message_length);
+    // TODO: refactor this function to work with struct buffer
+    return http_parse_content(request->message.buffer, size_content_received,
+                              content_len_header->value,
+                              content_len_header->value_len,
+                              MAX_RECV_BUFFER_SIZE - con_data->bytes_received,
+                              &request->message.buflen);
 }
 
 static inline int http_respond(struct client_data *con_data,
                                http_res           *response) {
-    struct send_buffer *send_buf = init_send_buf(INIT_SEND_BUFFER_CAPACITY);
+    struct send_buffer *send_buf = new_send_buf(con_data->client_mempool);
 
-    int ret = format_response(send_buf, response, server_conf.SERVNAME);
+    int ret =
+        format_response(&send_buf->buffer, response, server_conf.SERVNAME);
 
     enqueue_send_buf(&con_data->send_queue, send_buf);
 
@@ -371,22 +371,29 @@ static inline int http_respond(struct client_data *con_data,
 }
 
 static void processed_request(struct client_data *con_data) {
-    destroy_client_request(con_data);
-    init_client_request(con_data);
-
-    con_data->recv_buf.bytes_parsed = 0;
-    con_data->recv_buf.bytes_received = 0;
-    con_data->recv_buf.headers_parsed = false;
-    con_data->recv_buf.content_parsed = false;
-
-    con_data->close_requested = false;
+    destroy_client_request(&con_data->request);
+    init_client_request(&con_data->request, con_data->client_mempool);
 }
 
+static inline http_req server_to_user_request(struct http_request request) {
+    http_req user_request = {.path = request.path.buffer,
+                             .path_len = request.path.buflen,
+                             .num_headers = request.num_headers,
+                             .headers = request.headers,
+                             .method = request.method,
+                             .minor_ver = request.minor_ver,
+                             .message = request.message.buffer,
+                             .message_length = request.message.buflen};
+
+    return user_request;
+}
 void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     SUPPRESS_UNUSED(flags);
-    struct client_data *con_data = (struct client_data *)arg;
-    int                 status;
-    size_t             *bytes_parsed = &con_data->recv_buf.bytes_parsed;
+    LOG_DEBUG("recv, sockfd %d", sockfd);
+    struct client_data  *con_data = (struct client_data *)arg;
+    struct http_request *cur_request = &con_data->request;
+    int                  status;
+    size_t              *bytes_parsed = &con_data->bytes_parsed;
 
     /* this function calls recv() once, populates con_data->recv_buf, and
      * returns appropriate error codes. If there's still data to read after
@@ -419,10 +426,10 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
     LOG_DEBUG("received data %.20s", con_data->recv_buf.buffer);
 
     /* if HTTP headers were not parsed and put in con_data yet: */
-    if ( !con_data->recv_buf.headers_parsed ) {
+    if ( !con_data->headers_parsed ) {
         enum http_req_status req_status;
         /* parses everything preceding the content from request, populates
-         * @con_data->request->headers with HTTP headers values copied from
+         * @cur_request->headers with HTTP headers values copied from
          * request */
 
         switch ( (req_status = parse_request(con_data)) ) {
@@ -443,12 +450,12 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
                 return;
 
             case HTTP_OK:
-                con_data->recv_buf.headers_parsed = true;
+                con_data->headers_parsed = true;
 
                 /* write start address of content (message) to the http request
                  * struct
                  */
-                con_data->request.message =
+                cur_request->message.buffer =
                     con_data->recv_buf.buffer + *bytes_parsed;
                 break;
 
@@ -462,7 +469,7 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
                         "Exited parsing request but status is not HTTP_OK");
     }
 
-    if ( !con_data->recv_buf.content_parsed ) {
+    if ( !con_data->content_parsed ) {
         enum http_req_status req_status;
         /* continue parsing HTTP message content (or begin parsing if this is
          * the first pass). does not modify bytes_parsed unless completed
@@ -485,10 +492,10 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
                 return;
 
             case HTTP_OK:
-                /* con_data->request->message_length given correct value by
+                /* cur_request->message.bytes_written given correct value by
                  * parse_content() */
-                *bytes_parsed += con_data->request.message_length;
-                con_data->recv_buf.content_parsed = true;
+                *bytes_parsed += cur_request->message.buflen;
+                con_data->content_parsed = true;
                 break;
 
             default:
@@ -501,11 +508,13 @@ void recv_cb(socket_t sockfd, enum ev_flags flags, void *arg) {
                         "Exited parsing content but status is not HTTP_OK");
     }
 
-    http_res response = server_conf.handler(&con_data->request);
+    http_req user_request = server_to_user_request(*cur_request);
+    http_res response = server_conf.handler(user_request);
 
     if ( response.num_headers > MAX_NUM_HEADERS ) {
         LOG_ERR("handler returned response with too many headers, aborting.");
         // TODO proper handling of this situation instead of just returning
+        processed_request(con_data);
         return;
     }
 
@@ -550,11 +559,11 @@ int terminate_connection(struct client_data *con_data, enum ev_flags flags) {
 }
 
 int recv_data(socket_t sockfd, struct client_data *con_data) {
-    ev_ssize_t          nbytes = 0;
-    struct recv_buffer *recv_buf = &con_data->recv_buf;
+    ev_ssize_t     nbytes = 0;
+    struct buffer *recv_buf = &con_data->recv_buf;
 
-    nbytes = recv(sockfd, recv_buf->buffer + recv_buf->bytes_received,
-                  recv_buf->capacity - recv_buf->bytes_received, 0);
+    nbytes = recv(sockfd, recv_buf->buffer + con_data->bytes_received,
+                  recv_buf->capacity - con_data->bytes_received, 0);
 
     if ( nbytes == SOCKET_ERROR ) {
         switch ( EVUTIL_SOCKET_ERROR() ) {
@@ -579,7 +588,7 @@ int recv_data(socket_t sockfd, struct client_data *con_data) {
         LOG_ABORT("Unknown return value from recv()");
     }
 
-    recv_buf->bytes_received += (size_t)nbytes;
+    con_data->bytes_received += (size_t)nbytes;
     return RECV_SUCCESS;
 }
 
@@ -711,119 +720,96 @@ void http_respond_builtin_status(struct client_data *con_data,
  * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure to allocate
  * memory
  */
-static inline int init_client_request(struct client_data *con_data) {
-    // con_data->request = calloc(1, sizeof(*con_data->request));
-    // if ( !con_data->request ) return EXIT_FAILURE;
+static inline int init_client_request(struct http_request *request,
+                                      struct mempool      *parent_pool) {
+    request->req_mempool = new_mempool(parent_pool);
+    request->headers = mempool_alloc(request->req_mempool, HEADER_HASHSET_SIZE);
 
-    con_data->request.headers = init_hashset();
-    if ( !con_data->request.headers ) return EXIT_FAILURE;
-    con_data->request.path = malloc(URI_PATH_LEN_LIMIT);
-    if ( !con_data->request.path ) return EXIT_FAILURE;
-    con_data->request.path_bufcap = URI_PATH_LEN_LIMIT;
+    init_hashset(request->headers);
+    init_buffer(&request->path, request->pathbuf, ARR_SIZE(request->pathbuf),
+                ARR_SIZE(request->pathbuf));
 
     return EXIT_SUCCESS;
 }
 
-static inline int destroy_client_request(struct client_data *con_data) {
-    http_req *request = &con_data->request;
-
-    destroy_hashset(con_data->request.headers);
-    free(request->path);
-    // free(request);
-
-    return SUCCESS;
+static inline int destroy_client_request(struct http_request *request) {
+    /* check somehow if parent mempool (client mempool) wasn't destroyed
+     * already, which could cause bugs with the destroy_mempool call */
+    destroy_mempool(request->req_mempool);
 }
 
-struct send_buffer *init_send_buf(size_t capacity) {
-
-    struct send_buffer *send_buf = calloc(1, sizeof(struct send_buffer));
-
-    if ( !send_buf ) return NULL;
-
-    send_buf->buffer = malloc(capacity);
-
-    if ( !send_buf->buffer ) {
-        free(send_buf);
-        return NULL;
-    }
-
-    send_buf->capacity = capacity;
-
-    return send_buf;
-}
-
-void destroy_send_buf(struct send_buffer *send_buf) {
-    if ( !send_buf ) LOG_ABORT("send_buf missing!");
-    if ( !send_buf->buffer ) LOG_ABORT("send_buf buffer missing!");
-
-    free(send_buf->buffer);
-    free(send_buf);
+static inline int clear_client_request(struct http_request *request) {
+    LOG_ABORT("TODO");
+    // struct header_hashset *headers = request->headers;
+    // char                  *message_buf = request->message;
+    //
+    // reset_header_hashset(headers);
+    // memset(request, 0, sizeof(*request));
+    //
+    // request->headers = headers;
+    // request->message = message_buf;
 }
 
 /**
  * @brief initalizes the @recv_buf struct in struct client_data
  * @return EXIT_FAILURE on failure to allocate memory
  */
-static inline int init_client_recv_buf(struct client_data *con_data) {
-    unsigned int request_buffer_capacity = INIT_RECV_BUFFER_SIZE;
+static inline int init_client_recv_buf(struct buffer  *recv_buf,
+                                       struct mempool *pool) {
+    mem_status_t status = new_dynamic_buffer(
+        recv_buf, pool, INIT_RECV_BUFFER_SIZE, MAX_RECV_BUFFER_SIZE);
 
-    // con_data->recv_buf = calloc(1, sizeof(*con_data->recv_buf));
-    // if ( !con_data->recv_buf ) return EXIT_FAILURE;
-
-    struct recv_buffer *recv_buf = &con_data->recv_buf;
-
-    recv_buf->buffer = malloc(request_buffer_capacity);
-
-    if ( !recv_buf->buffer ) {
-        /* free successfully allocated data from this function */
-        free(recv_buf);
-        return EXIT_FAILURE;
+    switch ( status ) {
+        default:
+            LOG_ABORT("unknown return value from new_dynamic_buffer()");
     }
-
-    recv_buf->capacity = request_buffer_capacity;
 
     return EXIT_SUCCESS;
 }
 
 static inline int destroy_client_recv_buf(struct client_data *con_data) {
-    struct recv_buffer *recv_buf = &con_data->recv_buf;
+    free_buffer(&con_data->recv_buf);
 
-    if ( !recv_buf ) LOG_ABORT("recv_buf missing!");
-    if ( !recv_buf->buffer ) LOG_ABORT("recv_buf buffer missing!");
-
-    free(con_data->recv_buf.buffer);
-    // free(con_data->recv_buf);
-    return SUCCESS;
+    return EV_SUCCESS;
 }
 
 static inline int add_client_event(struct event_loop *ev_loop, socket_t socket,
                                    struct client_data *con_data) {
-    con_data->event = ev_add_conn(ev_loop, socket, con_data);
-    return SUCCESS;
+    con_data->event = mempool_alloc(con_data->client_mempool, CONN_DATA_SIZE);
+    ev_add_conn(ev_loop, con_data->event, socket, con_data);
+    return EV_SUCCESS;
 }
 
 static inline int remove_client_event(struct client_data *con_data) {
     ev_remove_conn(con_data->event);
     con_data->event = NULL;
-    return SUCCESS;
+    return EV_SUCCESS;
 }
 
 struct client_data *add_client(struct event_loop *ev_loop, socket_t socket) {
-    struct client_data *con_data = calloc(1, sizeof(struct client_data));
-    if ( !con_data ) HANDLE_ALLOC_FAIL();
+    const size_t client_aggregate_size =
+        sizeof(struct client_data) + CONN_DATA_SIZE;
+
+    struct mempool     *client_mempool = new_mempool(NULL);
+    struct client_data *con_data =
+        mempool_alloc(client_mempool, client_aggregate_size);
+
     con_data->sockfd = socket;
-
-    if ( init_client_recv_buf(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
-
-    if ( init_client_request(con_data) == EXIT_FAILURE ) HANDLE_ALLOC_FAIL();
-
-    if ( init_queue(&con_data->send_queue) == -1 )
-        LOG_ABORT("failed initializing client send queue");
-
     con_data->close_requested = false;
 
+    if ( init_client_recv_buf(&con_data->recv_buf, client_mempool) ==
+         EXIT_FAILURE )
+        LOG_ABORT("Failed initializing client recv_buf");
+
+    if ( init_client_request(&con_data->request, client_mempool) ==
+         EXIT_FAILURE )
+        LOG_ABORT("Failed initializing client request");
+
+    if ( init_queue(&con_data->send_queue) == -1 )
+        LOG_ABORT("Failed initializing client send queue");
+
     if ( add_client_event(ev_loop, socket, con_data) == EXIT_FAILURE )
-        HANDLE_ALLOC_FAIL();
+        LOG_ABORT("Failed adding client event");
 
     return con_data;
 }
@@ -835,38 +821,13 @@ struct client_data *add_client(struct event_loop *ev_loop, socket_t socket) {
  * @param con_data struct client_data to destroy
  */
 static inline void destroy_client(struct client_data *con_data) {
-    destroy_queue(&con_data->send_queue);
-    destroy_client_request(con_data);
-    destroy_client_recv_buf(con_data);
-    remove_client_event(con_data);
-
-    evutil_closesocket(con_data->sockfd);
-
     if ( !con_data ) LOG_ABORT("critical: con_data is NULL");
 
-    free(con_data);
-}
-
-static inline void reset_http_req(http_req *request) {
-    struct header_hashset *headers = request->headers;
-    char                  *message_buf = request->message;
-
-    reset_header_hashset(headers);
-    memset(request, 0, sizeof(*request));
-
-    request->headers = headers;
-    request->message = message_buf;
-}
-
-static inline struct send_buffer *dequeue_send_buf(struct queue *queue) {
-    return list_entry(dequeue(queue), struct send_buffer, entry);
-}
-static inline void enqueue_send_buf(struct queue       *queue,
-                                    struct send_buffer *send_buf) {
-    enqueue(queue, &send_buf->entry);
-}
-static inline struct send_buffer *peek_send_buf(struct queue *queue) {
-    return list_entry(queue->head, struct send_buffer, entry);
+    remove_client_event(con_data);
+    evutil_closesocket(con_data->sockfd);
+    destroy_queue(&con_data->send_queue);
+    destroy_client_request(&con_data->request);
+    destroy_mempool(con_data->client_mempool);
 }
 
 int finish_request_processing(struct client_data *con_data) {

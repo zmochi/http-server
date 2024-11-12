@@ -10,7 +10,14 @@
 #ifndef __EVENT_LOOP_H
 #define __EVENT_LOOP_H
 
+extern const size_t CONN_DATA_SIZE;
+
 typedef evutil_socket_t socket_t;
+
+typedef enum {
+    EV_SUCCESS,
+    EV_FAIL,
+} ev_status_t;
 
 /* flags to pass to libevent when calling event_new, for each possible type of
  * event relevant for the HTTP server */
@@ -21,7 +28,8 @@ enum ev_type {
     EV_NEWCONN,
 };
 
-#define SHORT_SET_LEFTMOST_BIT(bit) (1 << (CHAR_BIT * sizeof(short) - bit - 1))
+#define SHORT_SET_LEFTMOST_BIT(bit)                                            \
+    (1 << (CHAR_BIT * sizeof(short) - (bit) - 1))
 /* flags that an event callback can receive, must be set from left otherwise
  * they collide with event loop library flags */
 enum ev_flags : uint32_t {
@@ -60,7 +68,7 @@ struct event_loop {
  * @param ev allocated `struct event_loop` to initialize
  * @return 0 on success, 1 on failure
  */
-int ev_init_loop(struct event_loop *ev);
+ev_status_t ev_init_loop(struct event_loop *ev);
 
 /**
  * @brief adds a new connection (read, write and close connection events
@@ -73,8 +81,8 @@ int ev_init_loop(struct event_loop *ev);
  * @param cb_arg argument to pass to callbacks read/write/close connection
  * @returns an opaque struct of the added connection
  */
-struct conn_data *ev_add_conn(struct event_loop *ev_loop, socket_t socket,
-                              void *cb_arg);
+ev_status_t ev_add_conn(struct event_loop *ev_loop, struct conn_data *conn_data,
+                        socket_t socket, void *cb_arg);
 
 /**
  * @brief removes event (and its read, write and close events) @ev from its

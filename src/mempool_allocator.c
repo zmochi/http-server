@@ -1,15 +1,17 @@
 /**
- * @file memblocks.c
- * @brief block-scoped memory manager. manages allocated memory in
- * user-specified block sizes
+ * @file mempool_allocator.c
+ * @brief block-scoped memory manager. manages allocation and de-allocation of
+ * memory, allowing for fast re-use of previously allocated memory.
+ *
+ * a `block` is allocated memory that is one of the allowed sizes (so it can be
+ * re-used).
  */
 
-#include "../src/memblocks.h"
+#include "memblocks.h"
 #include "../src/defs.h" /* _Nullable, _Nonnull */
-#include "../src/list.h"
+#include "list.h"
 
 #include <assert.h>
-#include <errno.h>
 #include <math.h> /* for log2() */
 #include <pthread.h>
 #include <stdatomic.h>
@@ -19,7 +21,11 @@
 #include <stdlib.h>
 #include <string.h> /* memset */
 
-#define ERROR(msg) printf(msg), exit(1);
+#define ERROR(msg)                                                             \
+    do {                                                                       \
+        printf(msg);                                                           \
+        exit(1);                                                               \
+    } while ( 0 )
 
 typedef size_t blk_size_t;
 
@@ -30,16 +36,16 @@ constexpr size_t MAX_ALIGN = alignof(max_align_t);
 
 struct block_data;
 
-static mem_status_t new_block(struct memblock_allocator *module,
+static mem_status_t new_block(struct mempool_allocator *module,
                               struct block_data **metadata, blk_size_t size);
-static void         bucket_store(struct memblock_allocator *module,
-                                 struct block_data         *block);
+static void         bucket_store(struct mempool_allocator *module,
+                                 struct block_data        *block);
 static struct block_data *_Nullable bucket_retrieve(
-    struct memblock_allocator *_Nonnull module, blk_size_t size);
+    struct mempool_allocator *_Nonnull module, blk_size_t size);
 static struct block_data *get_memblock_metadata(const mem *startaddr);
 static mem *get_memblock_startaddr(const struct block_data *memblock);
 static inline struct bucket_node **_Nonnull get_module_bucket(
-    struct memblock_allocator *_Nonnull module, blk_size_t size);
+    struct mempool_allocator *_Nonnull module, blk_size_t size);
 
 struct block_data {
     blk_size_t size;
@@ -53,9 +59,13 @@ static void init_block_data(struct block_data *memblock, blk_size_t size) {
 }
 
 struct memchunk {
-    mem *const     startaddr;
+    /* TODO: `startaddr` and `total_size` are read-only memory but in the same
+     * cacheline as `top` which is frequently written to, causing false sharing.
+     * need to see if putting these variables on a different cacheline will
+     * improve performance */
+    mem           *startaddr;
+    size_t         total_size;
     _Atomic(mem *) top;
-    const size_t   total_size;
     /* linked list entry to chain chunks together */
     struct list_item entry;
     /* this causes the chunk itself, which appears immediately after this struct
@@ -65,13 +75,9 @@ struct memchunk {
 
 static void init_memchunk(struct memchunk *chunk, mem *startaddr,
                           size_t total_size) {
-    /* trick to initialize const members */
-    mem **startaddr_ptr = (mem **)&chunk->startaddr;
-    *startaddr_ptr = startaddr;
 
-    size_t *total_size_ptr = (size_t *)&chunk->total_size;
-    *total_size_ptr = total_size;
-
+    chunk->startaddr = startaddr;
+    chunk->total_size = total_size;
     chunk->top = chunk->startaddr;
 
     init_entry(&chunk->entry);
@@ -105,6 +111,7 @@ static struct memchunk *_Nullable new_memchunk(struct memchunk *oldchunk,
                                                size_t           size) {
     /* the memchunk metadata sits right before the actual chunk. this
      * implementation detail should be hidden.
+     *
      * added sizeof(struct block_data) so user can allocate a maximum of `size`
      * instead of a maximum of `size - sizeof(struct block_data)` struct
      * memchunk end is aligned to max alignment (in def), so the data segment is
@@ -133,6 +140,7 @@ static void destroy_memchunk(struct memchunk *chunk) { free(chunk); }
 constexpr auto MEMBLOCKS_MAX_EXP = 30; // max 1gb
 constexpr auto MEMBLOCKS_MIN_EXP = 0;
 constexpr auto MEMBLOCKS_NUM_LISTS = MEMBLOCKS_MAX_EXP - MEMBLOCKS_MIN_EXP + 1;
+constexpr auto MAX_MEM_SIZE = 1 << MEMBLOCKS_MAX_EXP;
 
 constexpr auto BUCKET_NODE_SIZE = 8;
 /* each bucket is a linked list, each linked list node contains BUCKET_NODE_SIZE
@@ -159,9 +167,10 @@ static void init_bucket_node(struct bucket_node *node) {
 }
 
 static void remove_last_bucket_node(
-    [[maybe_unused]] struct memblock_allocator *_Nonnull module,
+    [[maybe_unused]] struct mempool_allocator *_Nonnull module,
     struct bucket_node **_Nonnull bucket) {
     /* must be called under lock for bucket, no concurrent access is allowed */
+
     struct bucket_node *node = *bucket;
     /* can't remove node when bucket is empty */
     assert(*bucket != nullptr);
@@ -178,7 +187,7 @@ static void remove_last_bucket_node(
 }
 
 static void
-add_bucket_node([[maybe_unused]] struct memblock_allocator *_Nonnull module,
+add_bucket_node([[maybe_unused]] struct mempool_allocator *_Nonnull module,
                 struct bucket_node **_Nonnull bucket,
                 struct bucket_node *_Nonnull node) {
     /* must be called under lock for bucket, no concurrent access is allowed */
@@ -200,7 +209,7 @@ add_bucket_node([[maybe_unused]] struct memblock_allocator *_Nonnull module,
  * @return pointer to the new node, or nullptr if malloc() fails
  */
 static struct bucket_node *_Nullable new_bucket_node(
-    struct memblock_allocator *_Nonnull module) {
+    struct mempool_allocator *_Nonnull module) {
     struct bucket_node *new_node;
     struct block_data  *new_node_block;
 
@@ -233,7 +242,7 @@ static struct bucket_node *_Nullable new_bucket_node(
 }
 
 static struct bucket_node *_Nullable get_last_bucket_node(
-    struct memblock_allocator *_Nonnull module, blk_size_t size) {
+    struct mempool_allocator *_Nonnull module, blk_size_t size) {
 
     struct bucket_node **bucket = get_module_bucket(module, size);
     return *bucket;
@@ -258,14 +267,14 @@ static void init_memblock_buckets(struct mempool_buckets *buckets) {
         buckets->head[i] = nullptr;
 }
 
-struct memblock_allocator {
+struct mempool_allocator {
     /* active chunk.
      * must be atomic - see @ondemand_newchunk() */
     _Atomic(struct memchunk *) cur_chunk;
     /* array of memblock lists, each list contains memory blocks of some size
      * that can be re-used */
     struct mempool_buckets buckets;
-    const size_t           chunk_size;
+    size_t                 chunk_size;
     pthread_mutex_t        bucket_lock;
     pthread_mutex_t        memchunk_lock;
 };
@@ -274,38 +283,44 @@ struct memblock_allocator {
  * @brief initializer for struct memblock_allocator, allocates space for the
  * struct as well
  *
- * @return pointer to new memblock_allocator struct, or nullptr if chunk_size is
- * too small
+ * @return pointer to new memblock_allocator struct, nullptr if chunk_size is
+ * too small (error is printed) or nullptr if some error occurred
  */
-struct memblock_allocator *_Nullable new_memblock_allocator(size_t chunk_size) {
+struct mempool_allocator *_Nullable new_memblock_allocator(size_t chunk_size) {
     if ( chunk_size < sizeof(struct block_data) ||
          chunk_size < sizeof(struct bucket_node) ) {
         ERROR("chunk size is too small");
         return nullptr;
     }
 
-    struct memblock_allocator *module = malloc(sizeof(*module));
-    struct memchunk           *first_chunk = new_memchunk(nullptr, chunk_size);
+    struct mempool_allocator *module = malloc(sizeof(*module));
+    struct memchunk          *first_chunk = new_memchunk(nullptr, chunk_size);
     module->cur_chunk = first_chunk;
     module->chunk_size = chunk_size;
-    /* TODO: check return value of pthread_mutex_init() */
     /* must be recursive since can't avoid bucket_store calling bucket_retrieve
      */
     pthread_mutexattr_t recursive_mutex;
     pthread_mutexattr_init(&recursive_mutex);
     pthread_mutexattr_settype(&recursive_mutex, PTHREAD_MUTEX_RECURSIVE);
 
-    pthread_mutex_init(&module->bucket_lock, &recursive_mutex);
-    pthread_mutex_init(&module->memchunk_lock, nullptr);
+    int status1;
+    int status2;
+    status1 = pthread_mutex_init(&module->bucket_lock, &recursive_mutex);
+    status2 = pthread_mutex_init(&module->memchunk_lock, nullptr);
+    if ( status1 != 0 || status2 != 0 )
+        ERROR("couldn't initialize mempool_allocator mutexes");
 
     init_memblock_buckets(&module->buckets);
 
     return module;
 }
 
-void destroy_memblock_allocator(struct memblock_allocator *_Nonnull instance) {
+void destroy_mempool_allocator(struct mempool_allocator *_Nonnull instance) {
     /* TODO: for list_item in list... */
-    destroy_memchunk(instance->cur_chunk);
+    struct list_item *chunk_entry;
+    list_for_each(chunk_entry, &instance->cur_chunk->entry) {
+        destroy_memchunk(list_entry(chunk_entry, struct memchunk, entry));
+    }
     free(instance);
 }
 
@@ -339,7 +354,7 @@ static blk_size_t block_index(blk_size_t size) {
  * @return pointer to the module's buckets struct
  */
 static inline struct bucket_node **_Nonnull get_module_bucket(
-    struct memblock_allocator *_Nonnull module, blk_size_t size) {
+    struct mempool_allocator *_Nonnull module, blk_size_t size) {
     return &module->buckets.head[block_index(size)];
 }
 
@@ -366,7 +381,7 @@ static blk_size_t round_to_block(blk_size_t size) {
  * @param bucket pointer to bucket struct to store block in
  * @param block pointer to block to store
  */
-static void bucket_store(struct memblock_allocator *_Nonnull module,
+static void bucket_store(struct mempool_allocator *_Nonnull module,
                          struct block_data *_Nonnull block) {
     /* this definitely needs refactoring along with all the helper functions
      * used here pls help */
@@ -400,7 +415,7 @@ static void bucket_store(struct memblock_allocator *_Nonnull module,
 }
 
 static struct block_data *_Nullable bucket_retrieve(
-    struct memblock_allocator *_Nonnull module, blk_size_t size) {
+    struct mempool_allocator *_Nonnull module, blk_size_t size) {
     struct bucket_node **bucket = get_module_bucket(module, size);
     struct bucket_node  *last_bucket_node;
     struct block_data   *block;
@@ -503,7 +518,7 @@ static struct block_data *get_memblock_metadata(const mem *startaddr) {
  * nullptr if malloc() fails
  */
 static struct memchunk *_Nullable ondemand_newchunk(
-    struct memblock_allocator *_Nonnull module, size_t chunk_size,
+    struct mempool_allocator *_Nonnull module, size_t chunk_size,
     size_t size_mem_needed) {
 
     struct memchunk *newchunk =
@@ -520,8 +535,8 @@ static struct memchunk *_Nullable ondemand_newchunk(
              * assignment */
             newchunk = new_memchunk(module->cur_chunk, chunk_size);
             if ( newchunk == nullptr ) {
-                /* don't store newchunk, unlock mutex and return nullptr */
-                goto fail_nomem;
+                pthread_mutex_unlock(&module->memchunk_lock);
+                return nullptr;
             }
             atomic_store_explicit(&module->cur_chunk, newchunk,
                                   memory_order_relaxed);
@@ -530,7 +545,6 @@ static struct memchunk *_Nullable ondemand_newchunk(
              * assignment */
         }
 
-    fail_nomem:
         pthread_mutex_unlock(&module->memchunk_lock);
     }
 
@@ -548,7 +562,7 @@ static struct memchunk *_Nullable ondemand_newchunk(
  * @return NOMEM if new chunk is needed and can't be allocated,
  * MAX_SIZE_EXCEEDED if size is too big, MEM_SUCCESS on success */
 [[nodiscard]] static mem_status_t
-new_block(struct memblock_allocator *_Nonnull module,
+new_block(struct mempool_allocator *_Nonnull module,
           struct block_data **_Nonnull metadata, blk_size_t size) {
     // TODO: decide what to do when user allocates size == 0
     assert(size > 0);
@@ -598,9 +612,9 @@ new_block(struct memblock_allocator *_Nonnull module,
     return MEM_SUCCESS;
 }
 
-void *_Nullable memblock_alloc(struct memblock_allocator *_Nonnull instance,
+void *_Nullable memblock_alloc(struct mempool_allocator *_Nonnull instance,
                                size_t size) {
-    if ( size < 1 ) return nullptr;
+    if ( size < 1 || size > MAX_MEM_SIZE ) return nullptr;
 
     struct block_data *memblock = bucket_retrieve(instance, size);
 
@@ -629,7 +643,7 @@ void *_Nullable memblock_alloc(struct memblock_allocator *_Nonnull instance,
     return (void *)get_memblock_startaddr(memblock);
 }
 
-void memblock_dealloc(struct memblock_allocator *_Nonnull instance,
+void memblock_dealloc(struct mempool_allocator *_Nonnull instance,
                       void *_Nonnull block) {
     bucket_store(instance, get_memblock_metadata(block));
 }

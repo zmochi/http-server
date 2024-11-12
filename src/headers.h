@@ -2,6 +2,7 @@
 #define __HEADERS_H
 
 #include <libs/picohttpparser/picohttpparser.h>
+#include <src/mempool.h>
 #include <stdbool.h>
 #include <string.h> /* for strlen() */
 
@@ -34,6 +35,9 @@ enum http_header_props : uint32_t {
 /* a hashset to be used as a blackbox with the function defined in headers.h */
 struct header_hashset;
 
+/* size of `struct header_hashset`, an opaque struct */
+extern const size_t HEADER_HASHSET_SIZE;
+
 /**
  * @brief initializes a struct http_header
  *
@@ -50,9 +54,8 @@ static inline void http_header_init(struct http_header *header,
     header->value_len = strlen(header_value);
 }
 
-struct header_hashset *init_hashset(void);
+struct header_hashset *init_hashset(struct header_hashset *hashset);
 void                   reset_header_hashset(struct header_hashset *set);
-void                   destroy_hashset(struct header_hashset *set);
 struct header_value   *http_get_header(struct header_hashset *set,
                                        const char *name, unsigned int name_len);
 int http_set_header(struct header_hashset *set, const char *name,

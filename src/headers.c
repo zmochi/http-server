@@ -34,6 +34,8 @@
 
 #include <src/headers.h>
 #include <src/http_limits.h>
+#include <src/mempool.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -546,35 +548,25 @@ struct header_hashset {
     char value_storage[REQ_HEADER_VALUES_MAX_SIZE];
     /* an array containing pointers to the value of each header. the value is
      * stored in @value_storage */
-    struct header_value *arr;
+    struct header_value arr[MAX_HASH_VALUE];
     /* pointer to where in value_storage values can be inserted */
     char *value_storage_ptr;
 };
 
-const size_t arr_len = MAX_HASH_VALUE;
-const size_t arr_size = arr_len * sizeof(struct header_value);
+/* available to users with `extern`, found in headers.h so they can allocate
+ * space for the struct without knowing its implementation */
+const size_t HEADER_HASHSET_SIZE = sizeof(struct header_hashset);
 
-extern inline struct header_hashset *init_hashset(void) {
-    /* just an array of struct http_header*, the index for a header string @str
-     * is given by http_hash_header(str, strlen(str)) */
-    struct header_hashset *set = malloc(sizeof(struct header_hashset));
-    set->arr = malloc(arr_size);
-    memset(set->arr, 0, arr_size);
-    /* TODO: can initialize in O(1) */
+struct header_hashset *init_hashset(struct header_hashset *set) {
+    memset(set->arr, 0, sizeof(set->arr));
     set->value_storage_ptr = set->value_storage;
-    /* TODO: check malloc() fail */
 
     return set;
 }
 
-extern inline void reset_header_hashset(struct header_hashset *set) {
-    memset(set->arr, 0, arr_size);
+void reset_header_hashset(struct header_hashset *set) {
+    memset(set->arr, 0, sizeof(set->arr));
     set->value_storage_ptr = set->value_storage;
-}
-
-extern inline void destroy_hashset(struct header_hashset *set) {
-    free(set->arr);
-    free(set);
 }
 
 struct header_value *http_get_header(struct header_hashset *set,

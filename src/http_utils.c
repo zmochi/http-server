@@ -136,21 +136,6 @@ enum http_header_props http_extract_validate_header(
     return header_flags;
 }
 
-int handler_buf_realloc(char **buf, size_t *bufcap, size_t max_size,
-                        size_t new_size) {
-    // instead of realloc we can use a deamortized buffer (which
-    // requires 3x space allocation)
-
-    if ( new_size >= max_size ) return -2;
-
-    *buf = realloc(*buf, new_size);
-    *bufcap = new_size;
-
-    if ( *buf == NULL ) HANDLE_ALLOC_FAIL();
-
-    return 0;
-}
-
 ev_ssize_t num_to_str(char *str, size_t strcap, size_t num) {
     ev_ssize_t ret;
     ret = snprintf(str, strcap, "%zu", num);

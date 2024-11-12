@@ -1,53 +1,17 @@
-#include <libs/boost/CURRENT_FUNCTION.hpp>
+#ifndef __HTTP_UTILS_H
+#define __HTTP_UTILS_H
+
 #include <src/headers.h>
+#include <src/logger.h>
 
 #include <event2/util.h> /* for ev_ssize_t */
 #include <math.h>        /* for log10 in NUM_DIGITS macro */
 #include <stdio.h>
-
-#ifndef __HTTP_UTILS_H
-#define __HTTP_UTILS_H
-
-#ifdef DEBUG
-
-/* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG_DEBUG(fmt, ...)                                                    \
-    printf("DEBUG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
-
-#define LOG_ERR_DEBUG(fmt, ...)                                                \
-    (void)fprintf(stderr, "DEBUG: ERROR: %s: " fmt "\n",                       \
-                  BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
-#else
-
-#define LOG_DEBUG(fmt, ...)     ((void)0)
-#define LOG_ERR_DEBUG(fmt, ...) ((void)0)
-
-#endif
-
-/* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG(fmt, ...)                                                          \
-    printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
-
-#define LOG_ERR(fmt, ...)                                                      \
-    (void)fprintf(stderr, "ERROR: %s: line %d: " fmt "\n",                     \
-                  BOOST_CURRENT_FUNCTION, __LINE__, ##__VA_ARGS__)
-
-#define LOG_ABORT(fmt, ...)                                                    \
-    do {                                                                       \
-        LOG_ERR(fmt, ##__VA_ARGS__);                                           \
-        exit(1);                                                               \
-    } while ( 0 )
+#include <stdlib.h>      /* for exit() */
 
 #define HANDLE_ALLOC_FAIL()                                                    \
     do {                                                                       \
         LOG_ABORT("Allocation failed at line %d", __LINE__);                   \
-    } while ( 0 )
-
-/* exit() call should not be removed here, will break code */
-#define LOGIC_ERR(err_fmt, ...)                                                \
-    do {                                                                       \
-        LOG_ERR(err_fmt, ##__VA_ARGS__);                                       \
-        exit(1);                                                               \
     } while ( 0 )
 
 #define _VALIDATE_LOGIC(logic_cnd, err_msg, ...)                               \
@@ -126,17 +90,6 @@ enum http_header_props http_extract_validate_header(
     struct header_hashset *set, const char *header_name,
     unsigned int header_name_len, const char *expected_value,
     unsigned int expected_value_len);
-/**
- * @brief reallocates buffer to new size, if not exceeding max_size
- *
- * @param buf ptr to buffer
- * @param bufsize ptr to capacity of buffer
- * @param max_size maximum demanded capacity of buffer
- * @param new_size capacity to reallocate to
- * @return 0 on success, -2 if new_size is exceeded
- */
-int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
-                        size_t new_size);
 
 bool is_integer(const char str[], int str_len);
 

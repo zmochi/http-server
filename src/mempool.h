@@ -1,6 +1,7 @@
 #ifndef __MEMPOOL_H
 #define __MEMPOOL_H
 
+#include "mempool_allocator.h"
 #include <src/defs.h>
 #include <stddef.h> /* for size_t */
 
@@ -15,13 +16,6 @@ struct buffer {
 };
 
 struct mempool;
-struct block_data;
-
-typedef enum {
-    MEM_SUCCESS,
-    NOMEM,
-    MAX_SIZE_EXCEEDED,
-} mem_status_t;
 
 /**
  * @brief reallocates buffer to new size, if not exceeding max_size

@@ -2,8 +2,8 @@
 #include <src/defs.h> /* for KB, likely/unlikely */
 #include <src/freelist.h>
 #include <src/list.h>
-#include <src/memblocks.h>
 #include <src/mempool.h>
+#include <src/mempool_allocator.h>
 
 #include <stdalign.h>
 #include <stddef.h> /* for size_t */
@@ -34,7 +34,8 @@ static void init_mempool(struct mempool *mempool) {
     init_children_node(&mempool->children);
 }
 
-static void mempool_add_child(struct mempool *parent, struct mempool *child) {
+static void mempool_add_child(struct mempool *_Nonnull parent,
+                              struct mempool *_Nonnull child) {
     struct mempool_children_node *children = &parent->children;
 
     if ( children->num_children >= MEMPOOL_CHILDREN_PER_NODE ) {
@@ -62,19 +63,19 @@ static void mempool_add_child(struct mempool *parent, struct mempool *child) {
 /* collect all module data in a single struct for extensibility and readbility
  */
 struct mempool_module {
-    struct memblock_module *memblock_module;
+    struct mempool_allocator *memblock_module;
 };
 
 struct mempool_module module;
 
 int initialize_mempool_module(void) {
-    module.memblock_module = new_memblock_instance();
+    module.memblock_module = new_mempool_allocator();
 }
 
 /* used module interface in server.c to allocate memory - just implement now.
  * maybe allow user to allocate variable sized memory at any time from memory
  * pool and resize exponentially */
-struct mempool *new_mempool(struct mempool *__nullable parent) {
+struct mempool *_Nullable new_mempool(struct mempool *_Nullable parent) {
     struct mempool *new_pool = memblock_alloc(sizeof(*new_pool));
 
     init_mempool(new_pool);
@@ -85,4 +86,4 @@ struct mempool *new_mempool(struct mempool *__nullable parent) {
     return new_pool;
 }
 
-int destroy_mempool(struct mempool *__nonnull mempool) {}
+int destroy_mempool(struct mempool *_Nonnull mempool) {}

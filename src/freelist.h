@@ -93,6 +93,6 @@ fl_status freelist_rm(struct freelist *list, void *elem);
 /**
  * @brief returns ptr to element with index @idx in @list
  */
-void *list_elem(struct freelist *list, fl_index idx);
+void *freelist_elem(struct freelist *list, fl_index idx);
 
 #endif /* __FREELIST_H */

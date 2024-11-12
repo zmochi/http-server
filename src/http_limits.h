@@ -1,18 +1,16 @@
 #ifndef __HTTP_LIMITS_H
 #define __HTTP_LIMITS_H
 
-/* this is #define'd instead of being an int because in headers.h, this value is
- * used to declare the size of an array inside a struct which has to be a
- * constant (`extern const int` doesn't work for some reason) */
-#define REQ_HEADER_VALUES_MAX_SIZE (1 << 12) /* 4KB */
+constexpr unsigned int REQ_HEADER_VALUES_MAX_SIZE = (1 << 12); /* 4KB */
 
-extern const int BACKLOG;
-extern const int INIT_RECV_BUFFER_SIZE;
-extern const int INIT_SEND_BUFFER_CAPACITY;
-extern const int INIT_PATH_BUFFER_SIZE;
-extern const int MAX_RECV_BUFFER_SIZE;
-extern const int MAX_SEND_BUFFER_SIZE;
-extern const int SEND_REALLOC_MUL;
-extern const int RECV_REALLOC_MUL;
+constexpr unsigned int BACKLOG = 64;
+constexpr unsigned int INIT_RECV_BUFFER_SIZE = 256;
+constexpr unsigned int INIT_SEND_BUFFER_CAPACITY = (1 << 10); // 1KB
+/* a buffer containing the path of request is allocated for each request */
+constexpr unsigned int URI_PATH_LEN_LIMIT = 128;
+constexpr unsigned int MAX_RECV_BUFFER_SIZE = (1 << 13); // 8KB
+constexpr unsigned int MAX_SEND_BUFFER_SIZE = MAX_RECV_BUFFER_SIZE;
+constexpr unsigned int SEND_REALLOC_MUL = 2;
+constexpr unsigned int RECV_REALLOC_MUL = 2;
 
 #endif /* __HTTP_LIMITS_H */

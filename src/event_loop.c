@@ -27,6 +27,9 @@ struct conn_data {
     void *user_cb_arg;
 };
 
+/* returns sizeof(struct conn_data) */
+const size_t CONN_DATA_SIZE = sizeof(struct conn_data);
+
 /**
  * @brief adds event of type @ev_type to a libevent event loop @base. for
  * internal use only.
@@ -95,6 +98,7 @@ void _ev_close_conn_cb(socket_t socket, short flags, void *arg) {
  * @brief see _ev_close_conn_cb documentation
  */
 void _ev_write_cb(socket_t socket, short flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct conn_data *conn_data = (struct conn_data *)arg;
 
     conn_data->write_cb(socket, 0, conn_data->user_cb_arg);
@@ -104,6 +108,7 @@ void _ev_write_cb(socket_t socket, short flags, void *arg) {
  * @brief see _ev_close_conn_cb documentation
  */
 void _ev_read_cb(socket_t socket, short flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct conn_data *conn_data = (struct conn_data *)arg;
     conn_data->read_cb(socket, 0, conn_data->user_cb_arg);
 }
@@ -113,11 +118,12 @@ void _ev_read_cb(socket_t socket, short flags, void *arg) {
  * `struct event_loop`
  */
 void _ev_accept_cb(socket_t socket, short flags, void *arg) {
+    SUPPRESS_UNUSED(flags);
     struct event_loop *ev_loop = (struct event_loop *)arg;
     ev_loop->new_conn_cb(socket, 0, ev_loop);
 }
 
-int ev_init_loop(struct event_loop *ev_loop) {
+ev_status_t ev_init_loop(struct event_loop *ev_loop) {
     struct event_base *event_loop_base;
     struct event      *event_accept;
     socket_t           listen_sockfd = ev_loop->listen_sockfd;
@@ -155,15 +161,12 @@ int ev_init_loop(struct event_loop *ev_loop) {
 /* for internal use */
 typedef short libevent_flag_t;
 
-struct conn_data *ev_add_conn(struct event_loop *ev_loop, socket_t socket,
-                              void *cb_arg) {
-    /* freed in ev_remove_event */
-    struct conn_data *connection_data = calloc(1, sizeof(*connection_data));
-    struct timeval   *client_timeout = &ev_loop->default_timeout;
+ev_status_t ev_add_conn(struct event_loop *ev_loop, struct conn_data *conn_data,
+                        socket_t socket, void *cb_arg) {
+    struct timeval *client_timeout = &ev_loop->default_timeout;
 
     ev_callback_fn read_cb = ev_loop->read_cb, write_cb = ev_loop->write_cb,
-                   close_conn_cb = ev_loop->close_conn_cb,
-                   new_conn_cb = ev_loop->new_conn_cb;
+                   close_conn_cb = ev_loop->close_conn_cb;
 
     _VALIDATE_LOGIC(ev_loop->base != NULL,
                     "base field of `struct event_loop` should be set by "
@@ -172,39 +175,34 @@ struct conn_data *ev_add_conn(struct event_loop *ev_loop, socket_t socket,
                         ev_loop->default_timeout.tv_usec > 0,
                     "`struct event_loop` must have timeout > 0.");
 
-    connection_data->ev_loop = ev_loop;
+    conn_data->ev_loop = ev_loop;
 
     /* set timeout to default timeout of events in this event loop */
-    connection_data->timeout = *client_timeout;
+    conn_data->timeout = *client_timeout;
 
-    connection_data->read_cb = read_cb;
-    connection_data->write_cb = write_cb;
-    connection_data->close_conn_cb = close_conn_cb;
-    connection_data->user_cb_arg = cb_arg;
+    conn_data->read_cb = read_cb;
+    conn_data->write_cb = write_cb;
+    conn_data->close_conn_cb = close_conn_cb;
+    conn_data->user_cb_arg = cb_arg;
 
     /* add_event() simply exits on error, no need to check errors */
-    connection_data->event_read = add_event(ev_loop->base, socket, EV_RECV,
-                                            _ev_read_cb, NULL, connection_data);
+    conn_data->event_read =
+        add_event(ev_loop->base, socket, EV_RECV, _ev_read_cb, NULL, conn_data);
 
-    connection_data->event_write = add_event(
-        ev_loop->base, socket, EV_SEND, _ev_write_cb, NULL, connection_data);
+    conn_data->event_write = add_event(ev_loop->base, socket, EV_SEND,
+                                       _ev_write_cb, NULL, conn_data);
 
-    connection_data->event_close_con =
+    conn_data->event_close_con =
         add_event(ev_loop->base, socket, EV_CLOSE, _ev_close_conn_cb,
-                  client_timeout, connection_data);
+                  client_timeout, conn_data);
 
-    connection_data->sockfd = socket;
-
-    return connection_data;
+    conn_data->sockfd = socket;
 }
 
 void ev_remove_conn(struct conn_data *conn_data) {
     event_free(conn_data->event_read);
     event_free(conn_data->event_write);
     event_free(conn_data->event_close_con);
-
-    /* allocated in ev_add_conn */
-    free(conn_data);
 }
 
 void event_wake(struct conn_data *ev_data, enum ev_type ev_type,
@@ -234,7 +232,11 @@ void event_wake(struct conn_data *ev_data, enum ev_type ev_type,
             LOGIC_ERR("Passed non-existent event type.");
     }
 
-    event_active(event_to_wake, flags, 0);
+    _VALIDATE_LOGIC(
+        sizeof(int) >= sizeof(enum ev_flags),
+        "Conversion of enum ev_flags to int for libevent loses information");
+
+    event_active(event_to_wake, (int)flags, 0);
 }
 
 struct event *add_event(struct event_base *base, socket_t socket,

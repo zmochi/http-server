@@ -1,52 +1,17 @@
-#include <boost/CURRENT_FUNCTION.hpp>
-#include <src/headers.h>
-
-#include <event2/util.h>
-#include <stdio.h>
-
 #ifndef __HTTP_UTILS_H
 #define __HTTP_UTILS_H
 
-#ifdef DEBUG
+#include <src/headers.h>
+#include <src/logger.h>
 
-/* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG_DEBUG(fmt, ...)                                                    \
-    printf("DEBUG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
-
-#define LOG_ERR_DEBUG(fmt, ...)                                                \
-    fprintf(stderr, "DEBUG: ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,     \
-            ##__VA_ARGS__)
-#else
-
-#define LOG_DEBUG(fmt, ...)     ((void)0)
-#define LOG_ERR_DEBUG(fmt, ...) ((void)0)
-
-#endif
-
-/* ##__VA_ARGS__ requires compiling with gcc or clang */
-#define LOG(fmt, ...)                                                          \
-    printf("LOG: %s: " fmt "\n", BOOST_CURRENT_FUNCTION, ##__VA_ARGS__)
-
-#define LOG_ERR(fmt, ...)                                                      \
-    fprintf(stderr, "ERROR: %s: " fmt "\n", BOOST_CURRENT_FUNCTION,            \
-            ##__VA_ARGS__)
-
-#define LOG_ABORT(fmt, ...)                                                    \
-    do {                                                                       \
-        LOG_ERR(fmt, ##__VA_ARGS__);                                           \
-        exit(1);                                                               \
-    } while ( 0 )
+#include <event2/util.h> /* for ev_ssize_t */
+#include <math.h>        /* for log10 in NUM_DIGITS macro */
+#include <stdio.h>
+#include <stdlib.h>      /* for exit() */
 
 #define HANDLE_ALLOC_FAIL()                                                    \
     do {                                                                       \
         LOG_ABORT("Allocation failed at line %d", __LINE__);                   \
-    } while ( 0 )
-
-/* exit() call should not be removed here, will break code */
-#define LOGIC_ERR(err_fmt, ...)                                                \
-    do {                                                                       \
-        LOG_ERR(err_fmt, ##__VA_ARGS__);                                       \
-        exit(1);                                                               \
     } while ( 0 )
 
 #define _VALIDATE_LOGIC(logic_cnd, err_msg, ...)                               \
@@ -56,6 +21,14 @@
 
 /* returns size_t of statically allocated array */
 #define ARR_SIZE(arr) ((size_t)(sizeof(arr) / sizeof(arr[0])))
+
+/* suppress unused argument warning */
+#define SUPPRESS_UNUSED(arg) ((void)arg)
+
+/* get number of digits in integer num */
+static inline unsigned int NUM_DIGITS(size_t num) {
+    return ((unsigned int)(log10((double)num) + 1));
+}
 
 /**
  * @brief copies and formats an array of headers into a buffer
@@ -113,22 +86,10 @@ int populate_headers_map(struct header_hashset *set,
  * @param expected_value_len expected value length
  * @return a bitmask of fields from `enum http_header_props` (from headers.h)
  */
-int http_extract_validate_header(struct header_hashset *set,
-                                 const char            *header_name,
-                                 size_t                 header_name_len,
-                                 const char            *expected_value,
-                                 size_t                 expected_value_len);
-/**
- * @brief reallocates buffer to new size, if not exceeding max_size
- *
- * @param buf ptr to buffer
- * @param bufsize ptr to capacity of buffer
- * @param max_size maximum demanded capacity of buffer
- * @param new_size capacity to reallocate to
- * @return 0 on success, -2 if new_size is exceeded
- */
-int handler_buf_realloc(char **buf, size_t *bufsize, size_t max_size,
-                        ev_ssize_t new_size);
+enum http_header_props http_extract_validate_header(
+    struct header_hashset *set, const char *header_name,
+    unsigned int header_name_len, const char *expected_value,
+    unsigned int expected_value_len);
 
 bool is_integer(const char str[], int str_len);
 

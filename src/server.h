@@ -1,7 +1,12 @@
-#include <src/event_loop.h>
+#ifndef __MAIN_H
+#define __MAIN_H
+
+#include <http.h> /* user exposed header file, includes http_res, http_req, enum http_method... */
 #include <src/headers.h>
+#include <src/mempool.h>
 #include <src/parser.h>
 #include <src/queue.h>
+#include <src/response.h>
 #include <src/status_codes.h>
 #ifdef _WIN32
 #include <winsock.h>
@@ -12,68 +17,46 @@
 
 #endif
 
-/* libevent: */
-#include <event2/event.h>
-
 /* cross-platform, C standard libraries: */
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-#ifndef __MAIN_H
-#define __MAIN_H
-
 #define SOCKET_ERROR -1
 
-struct send_buffer {
-    char            *buffer;
-    size_t           bytes_sent, actual_len, capacity;
-    struct list_item entry;
-};
-
-struct recv_buffer {
-    char  *buffer;
-    size_t bytes_parsed, bytes_received;
-    size_t capacity;
-    bool   headers_parsed, content_parsed;
+/* http request struct for inner use, hidden from user */
+struct http_request {
+    struct mempool *req_mempool;
+    /* an independent buffer holding the request path */
+    struct buffer path;
+    /* the actual buffer for `path` member above, grouped together with the
+     * request struct */
+    char             pathbuf[URI_PATH_LEN_LIMIT];
+    struct buffer    message;
+    enum http_method method;
+    int              minor_ver;
+    /* hashset of headers of HTTP req, each headers value is copied into a
+     * buffer inside this struct and is indepedent of the recv buffer */
+    struct header_hashset *headers;
+    size_t                 num_headers;
+    /* points to content of HTTP req (points inside recv_buffer) from client */
 };
 
 struct client_data {
-    socket_t            sockfd;
-    struct conn_data   *event;
-    struct queue        send_queue;
-    struct recv_buffer *recv_buf;
-    http_req           *request;
-    bool                close_requested;
+    int               sockfd;
+    struct conn_data *event;
+    struct mempool   *client_mempool;
+    struct queue      send_queue;
+    struct buffer     recv_buf;
+    /* number of bytes received and parsed in current request */
+    size_t bytes_received, bytes_parsed;
+    /* if headers and content were parsed in current request */
+    bool headers_parsed, content_parsed;
+    /* parsed request goes here */
+    struct http_request request;
+    /* if the server wants to close the connection */
+    bool close_requested;
 };
-
-enum res_flags {
-    PLACEHOLDER = 1,
-};
-
-typedef struct {
-    http_status_code    status_code;
-    char               *message;     /* HTTP response content */
-    size_t              message_len;
-    struct http_header *headers_arr; /* linked list of headers */
-    size_t              num_headers;
-    /* bit mask of flags */
-    enum res_flags res_flags;
-} http_res;
-
-typedef struct {
-    char          *ROOT_PATH;
-    char          *PORT;
-    char          *SERVNAME;
-    struct timeval timeout;
-    /* generates a reponse to request.
-     *  - must use malloc() to allocate http_res.headers_arr, http_res.message
-     *  - must set all fields of http_res
-     */
-    http_res (*handler)(http_req *request);
-} config;
-
-int init_server(config conf);
 
 #endif /* __MAIN_H */

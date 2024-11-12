@@ -14,3 +14,8 @@ static_lib: $(PICO_OBJ)
 
 $(PICO_OBJ): $(PICO_SRC)
 	$(CC) -c $(PICO_SRC) -o $(PICO_OBJ)
+
+clean:
+	rm -f $(PICO_OBJ) $(PICO_LIB)
+
+.PHONY: clean

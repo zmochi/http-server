@@ -1,14 +1,33 @@
-#include <src/container_of.h>
+/**
+ * @file list.h
+ * @brief doubly linked-list implementation inspired by linux/list.h.
+ *
+ * to use, add a `struct list_item` field to your struct. initialize it with
+ * init_entry(), and manipulate the list with the functions in this header. to
+ * get a pointer to the container of a `struct list_item`, see `list_entry()`
+ * macro.
+ *
+ * container_of() uses undefined behavior and may not be portable
+ */
 
 #ifndef __LIST_H
 #define __LIST_H
+
+#include "container_of.h"
 
 struct list_item {
     struct list_item *prev, *next;
 };
 
+/* item_ptr - pointer to struct list_item whose container to retrieve
+ * container_type - name of container that contains a struct list_item
+ * container_member - name of struct list_item in container */
 #define list_entry(item_ptr, container_type, container_member)                 \
     container_of(item_ptr, container_type, container_member)
+
+#define list_for_each(pos, entry_start)                                        \
+    for ( (pos) = (entry_start)->next; (pos) != (entry_start);                 \
+          (pos) = (pos)->next )
 
 static inline void init_entry(struct list_item *entry) {
     entry->prev = entry;
@@ -24,10 +43,15 @@ static inline void init_entry(struct list_item *entry) {
  */
 static inline void insert_entry(struct list_item *new, struct list_item *prev,
                                 struct list_item *next) {
-    new->next  = next;
-    new->prev  = prev;
+    new->next = next;
+    new->prev = prev;
     prev->next = new;
     next->prev = new;
+}
+
+static inline bool list_entries_equal(const struct list_item *entry1,
+                                      const struct list_item *entry2) {
+    return entry1 == entry2;
 }
 
 /**
